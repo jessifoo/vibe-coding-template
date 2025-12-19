@@ -1,5 +1,6 @@
 .PHONY: dev dev-frontend dev-backend prod prod-frontend prod-backend clean help
 .PHONY: db-migration-new db-apply db-list db-push db-status
+.PHONY: backend-build backend-test backend-lint
 
 # Default target
 .DEFAULT_GOAL := help
@@ -51,10 +52,30 @@ build-frontend: ## Build frontend for production
 	@echo "${GREEN}Building frontend for production...${NC}"
 	cd frontend && npm run build
 
-# Backend helpers
-install-backend: ## Install backend dependencies locally
-	@echo "${GREEN}Installing backend dependencies...${NC}"
-	cd backend && pip install -r requirements.txt
+# Backend helpers (Rust)
+install-backend: ## Install backend development tools
+	@echo "${GREEN}Installing backend development tools...${NC}"
+	cd backend && cargo install cargo-watch cargo-audit
+
+build-backend: ## Build backend in release mode
+	@echo "${GREEN}Building backend for production...${NC}"
+	cd backend && cargo build --release
+
+test-backend: ## Run backend tests
+	@echo "${GREEN}Running backend tests...${NC}"
+	cd backend && cargo test
+
+lint-backend: ## Run backend linter (clippy)
+	@echo "${GREEN}Running backend linter...${NC}"
+	cd backend && cargo clippy -- -D warnings
+
+check-backend: ## Check backend compiles
+	@echo "${GREEN}Checking backend...${NC}"
+	cd backend && cargo check
+
+fmt-backend: ## Format backend code
+	@echo "${GREEN}Formatting backend code...${NC}"
+	cd backend && cargo fmt
 
 # Supabase database migrations (all for remote database)
 db-migration-new: ## Create a new migration file (Usage: make db-migration-new name=create_users_table)
@@ -81,6 +102,10 @@ db-status: ## Show pending migrations status
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "${YELLOW}Migration files in project:${NC}"
 	@ls -1 supabase/migrations/*.sql 2>/dev/null | sed 's/.*\//  /' || echo "  None"
+
+# CI helpers
+ci: lint-backend test-backend ## Run all CI checks
+	@echo "${GREEN}All CI checks passed!${NC}"
 
 # Help command
 help: ## Show this help

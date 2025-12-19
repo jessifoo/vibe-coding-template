@@ -1,16 +1,43 @@
-FROM python:3.10-slim
+# Development Dockerfile for Rust Backend
+# Includes cargo-watch for hot reloading
+
+FROM rust:1.83-slim
 
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install build dependencies and development tools
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set environment variables
-ENV PYTHONPATH=/app
+# Install cargo-watch for hot reloading
+RUN cargo install cargo-watch
 
-# Expose the port the app runs on
+# Copy manifests first for dependency caching
+COPY Cargo.toml Cargo.lock* ./
+
+# Create dummy source for dependency compilation
+RUN mkdir src && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "pub fn dummy() {}" > src/lib.rs
+
+# Build dependencies (this layer will be cached)
+RUN cargo build && \
+    rm -rf src
+
+# Source will be mounted via volume in docker-compose
+
+# Expose port
 EXPOSE 8000
 
-# Command to run the application with hot-reload
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Set environment defaults
+ENV ENVIRONMENT=development
+ENV HOST=0.0.0.0
+ENV PORT=8000
+ENV RUST_LOG=backend=debug,tower_http=debug,axum=debug
+ENV RUST_BACKTRACE=1
+
+# Run with hot reload using cargo-watch
+CMD ["cargo", "watch", "-x", "run"]

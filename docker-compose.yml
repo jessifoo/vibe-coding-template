@@ -28,8 +28,12 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/app/target
     environment:
       - ENVIRONMENT=development
+      - HOST=0.0.0.0
+      - PORT=8000
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -38,10 +42,15 @@ services:
       - QDRANT_API_KEY=${QDRANT_API_KEY}
       - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME}
       - CORS_ORIGINS=http://localhost:3000,http://frontend:3000,http://127.0.0.1:3000
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - RUST_LOG=backend=debug,tower_http=debug,axum=debug
+      - RUST_BACKTRACE=1
     networks:
       - app-network
 
 networks:
   app-network:
     driver: bridge
+
+volumes:
+  cargo-cache:
+  target-cache:
