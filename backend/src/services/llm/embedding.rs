@@ -21,7 +21,11 @@ pub trait EmbeddingService: Send + Sync {
     /// # Errors
     ///
     /// Returns an error if embedding creation fails.
-    async fn create_embedding(&self, text: &str, model: &str) -> Result<EmbeddingResponse, AppError>;
+    async fn create_embedding(
+        &self,
+        text: &str,
+        model: &str,
+    ) -> Result<EmbeddingResponse, AppError>;
 }
 
 /// OpenAI embedding service.
@@ -51,7 +55,11 @@ impl OpenAiEmbeddingService {
 
 #[async_trait]
 impl EmbeddingService for OpenAiEmbeddingService {
-    async fn create_embedding(&self, text: &str, model: &str) -> Result<EmbeddingResponse, AppError> {
+    async fn create_embedding(
+        &self,
+        text: &str,
+        model: &str,
+    ) -> Result<EmbeddingResponse, AppError> {
         #[derive(Serialize)]
         struct EmbeddingRequest<'a> {
             model: &'a str,
@@ -85,7 +93,9 @@ impl EmbeddingService for OpenAiEmbeddingService {
             .json(&request)
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("OpenAI embedding request failed: {e}")))?;
+            .map_err(|e| {
+                AppError::ExternalService(format!("OpenAI embedding request failed: {e}"))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -95,10 +105,9 @@ impl EmbeddingService for OpenAiEmbeddingService {
             )));
         }
 
-        let openai_response: OpenAiEmbeddingResponse = response
-            .json()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to parse embedding response: {e}")))?;
+        let openai_response: OpenAiEmbeddingResponse = response.json().await.map_err(|e| {
+            AppError::ExternalService(format!("Failed to parse embedding response: {e}"))
+        })?;
 
         let embedding = openai_response
             .data
@@ -137,7 +146,11 @@ impl AnthropicEmbeddingService {
 
 #[async_trait]
 impl EmbeddingService for AnthropicEmbeddingService {
-    async fn create_embedding(&self, _text: &str, _model: &str) -> Result<EmbeddingResponse, AppError> {
+    async fn create_embedding(
+        &self,
+        _text: &str,
+        _model: &str,
+    ) -> Result<EmbeddingResponse, AppError> {
         // Anthropic doesn't currently have a dedicated embeddings API
         // This returns an error directing users to use OpenAI for embeddings
         Err(AppError::Configuration(

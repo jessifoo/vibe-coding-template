@@ -131,10 +131,9 @@ impl LlmService for OpenAiService {
             )));
         }
 
-        let openai_response: OpenAiResponse = response
-            .json()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to parse OpenAI response: {e}")))?;
+        let openai_response: OpenAiResponse = response.json().await.map_err(|e| {
+            AppError::ExternalService(format!("Failed to parse OpenAI response: {e}"))
+        })?;
 
         let text = openai_response
             .choices
@@ -248,10 +247,9 @@ impl LlmService for AnthropicService {
             )));
         }
 
-        let anthropic_response: AnthropicResponse = response
-            .json()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to parse Anthropic response: {e}")))?;
+        let anthropic_response: AnthropicResponse = response.json().await.map_err(|e| {
+            AppError::ExternalService(format!("Failed to parse Anthropic response: {e}"))
+        })?;
 
         let text = anthropic_response
             .content

@@ -43,10 +43,11 @@ make dev-backend   # Backend only
 
 ### Making Changes
 
-#### Backend Changes
-- Edit Python files in `backend/app/`
-- FastAPI auto-reloads on file changes
+#### Backend Changes (Rust)
+- Edit Rust files in `backend/src/`
+- `cargo watch` auto-rebuilds on file changes
 - Check logs: `docker-compose logs -f backend`
+- Run checks: `cd backend && cargo check && cargo clippy`
 
 #### Frontend Changes
 - Edit TypeScript/React files in `frontend/`
@@ -81,10 +82,13 @@ make db-status
 
 ### Code Quality
 
-#### Backend Code Quality
-- Follow FastAPI standards from `.cursor/rules/backend/fastapi-standards.mdc`
-- Use proper error handling and HTTP status codes
-- Include type hints and docstrings
+#### Backend Code Quality (Rust)
+- Follow Axum standards from `.cursor/rules/backend/fastapi-standards.mdc`
+- Run `cargo clippy` - no warnings allowed
+- Run `cargo fmt` before committing
+- Use `Result<T, AppError>` for all fallible operations
+- No `.unwrap()` or `.expect()` (except in tests)
+- Add doc comments to all public items
 - Use the service layer pattern
 
 #### Frontend Code Quality
@@ -216,10 +220,22 @@ git commit -m "docs(readme): update setup instructions"
 ```
 
 ### Pre-commit Checklist
-- [ ] Code follows project standards
-- [ ] All tests pass
+
+#### Rust Backend
+- [ ] `cargo check` passes
+- [ ] `cargo clippy` passes (no warnings)
+- [ ] `cargo fmt` has been run
+- [ ] `cargo test` passes
+- [ ] No `.unwrap()` or `.expect()` (except tests)
+
+#### TypeScript Frontend
+- [ ] `npm run lint` passes
+- [ ] `npm run build` passes
+- [ ] No `any` types
+
+#### General
+- [ ] Code follows project standards (see `CODE_STANDARDS.md`)
 - [ ] API endpoints tested
-- [ ] Frontend components render correctly
 - [ ] Database migrations applied
 - [ ] Environment variables documented
 - [ ] No sensitive data in commits

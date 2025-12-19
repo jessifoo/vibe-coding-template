@@ -2,6 +2,31 @@
 
 This is a modern, modular full-stack application starter template with Next.js frontend and Rust Axum backend, integrated with Supabase.
 
+## ⚠️ CRITICAL RULES FOR AI ASSISTANTS
+
+Before writing ANY code, you MUST follow these rules:
+
+### FORBIDDEN (Never Do)
+- ❌ Use `any` type in TypeScript
+- ❌ Use `.unwrap()` or `.expect()` in Rust
+- ❌ Use `// @ts-ignore` or `// @ts-nocheck`
+- ❌ Skip input validation
+- ❌ Swallow errors silently
+- ❌ Leave TODO without context
+- ❌ Commit commented-out code
+
+### REQUIRED (Always Do)
+- ✅ Run `cargo check && cargo clippy` for Rust changes
+- ✅ Run `npm run lint` for TypeScript changes
+- ✅ Explicit types on ALL functions
+- ✅ Handle ALL error cases
+- ✅ Log important operations
+- ✅ Follow existing patterns
+
+See `CODE_STANDARDS.md` and `.cursor/rules/ai-guidelines.mdc` for full details.
+
+---
+
 ## Architecture Overview
 
 - **Backend**: Rust Axum with Supabase integration (auth, database, storage)

@@ -1,403 +1,457 @@
 ---
-description: Template for creating new service classes
+description: Template for creating new Rust service classes
 globs: []
 alwaysApply: false
 ---
 
-# Service Class Template
-
-Use this template when creating new service classes:
-
-```python
-from typing import Dict, List, Any, Optional, TypeVar, Generic, Type
-from abc import ABC, abstractmethod
-import logging
-from datetime import datetime
-
-from app.core.config import settings
-
-# Set up logging
-logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
-
-class BaseService(ABC, Generic[T]):
-    """Abstract base class for all services."""
-
-    def __init__(self, service_name: str):
-        self.service_name = service_name
-        self.logger = logging.getLogger(f"{__name__}.{service_name}")
-
-    @abstractmethod
-    async def initialize(self) -> None:
-        """Initialize the service. Override in subclasses."""
-        pass
-
-    @abstractmethod
-    async def health_check(self) -> bool:
-        """Check if the service is healthy. Override in subclasses."""
-        pass
-
-class ExampleService(BaseService[dict]):
-    """
-    Example service class demonstrating the standard pattern.
-
-    This service handles [describe what the service does].
-    """
-
-    def __init__(self):
-        super().__init__("ExampleService")
-        self._initialized = False
-        self._client = None
-
-    async def initialize(self) -> None:
-        """Initialize the service with necessary configurations."""
-        try:
-            self.logger.info("Initializing ExampleService")
-
-            # Initialize external clients, connections, etc.
-            self._client = self._create_client()
-
-            # Perform any setup operations
-            await self._setup()
-
-            self._initialized = True
-            self.logger.info("ExampleService initialized successfully")
-
-        except Exception as e:
-            self.logger.error(f"Failed to initialize ExampleService: {str(e)}")
-            raise
-
-    async def health_check(self) -> bool:
-        """Check if the service is healthy and operational."""
-        try:
-            if not self._initialized:
-                return False
-
-            # Perform health check operations
-            # e.g., ping external service, check database connection, etc.
-            result = await self._ping_service()
-
-            self.logger.debug(f"Health check result: {result}")
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Health check failed: {str(e)}")
-            return False
-
-    async def create_item(self, data: Dict[str, Any]) -> dict:
-        """
-        Create a new item.
-
-        Args:
-            data: Dictionary containing item data
-
-        Returns:
-            Created item data
-
-        Raises:
-            ValueError: If data is invalid
-            RuntimeError: If service is not initialized or operation fails
-        """
-        self._ensure_initialized()
-
-        try:
-            # Validate input data
-            validated_data = self._validate_create_data(data)
-
-            self.logger.info(f"Creating item with data: {validated_data}")
-
-            # Perform the creation operation
-            result = await self._perform_create(validated_data)
-
-            self.logger.info(f"Successfully created item: {result.get('id')}")
-            return result
-
-        except ValueError as e:
-            self.logger.warning(f"Invalid data for item creation: {str(e)}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Failed to create item: {str(e)}")
-            raise RuntimeError(f"Item creation failed: {str(e)}")
-
-    async def get_item(self, item_id: str) -> Optional[dict]:
-        """
-        Retrieve an item by ID.
-
-        Args:
-            item_id: Unique identifier for the item
-
-        Returns:
-            Item data if found, None otherwise
-
-        Raises:
-            ValueError: If item_id is invalid
-            RuntimeError: If service is not initialized or operation fails
-        """
-        self._ensure_initialized()
-
-        if not item_id or not isinstance(item_id, str):
-            raise ValueError("Valid item_id is required")
-
-        try:
-            self.logger.debug(f"Retrieving item: {item_id}")
-
-            result = await self._perform_get(item_id)
-
-            if result:
-                self.logger.debug(f"Found item: {item_id}")
-            else:
-                self.logger.debug(f"Item not found: {item_id}")
-
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Failed to retrieve item {item_id}: {str(e)}")
-            raise RuntimeError(f"Item retrieval failed: {str(e)}")
-
-    async def list_items(self, filters: Optional[Dict[str, Any]] = None, limit: int = 100) -> List[dict]:
-        """
-        List items with optional filtering.
-
-        Args:
-            filters: Optional dictionary of filters to apply
-            limit: Maximum number of items to return
-
-        Returns:
-            List of item data
-
-        Raises:
-            ValueError: If parameters are invalid
-            RuntimeError: If service is not initialized or operation fails
-        """
-        self._ensure_initialized()
-
-        if limit <= 0 or limit > 1000:
-            raise ValueError("Limit must be between 1 and 1000")
-
-        try:
-            self.logger.debug(f"Listing items with filters: {filters}, limit: {limit}")
-
-            result = await self._perform_list(filters or {}, limit)
-
-            self.logger.debug(f"Retrieved {len(result)} items")
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Failed to list items: {str(e)}")
-            raise RuntimeError(f"Item listing failed: {str(e)}")
-
-    async def update_item(self, item_id: str, data: Dict[str, Any]) -> dict:
-        """
-        Update an existing item.
-
-        Args:
-            item_id: Unique identifier for the item
-            data: Dictionary containing updated data
-
-        Returns:
-            Updated item data
-
-        Raises:
-            ValueError: If parameters are invalid
-            RuntimeError: If service is not initialized or operation fails
-        """
-        self._ensure_initialized()
-
-        if not item_id or not isinstance(item_id, str):
-            raise ValueError("Valid item_id is required")
-
-        try:
-            # Validate update data
-            validated_data = self._validate_update_data(data)
-
-            self.logger.info(f"Updating item {item_id} with data: {validated_data}")
-
-            result = await self._perform_update(item_id, validated_data)
-
-            self.logger.info(f"Successfully updated item: {item_id}")
-            return result
-
-        except ValueError as e:
-            self.logger.warning(f"Invalid data for item update: {str(e)}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Failed to update item {item_id}: {str(e)}")
-            raise RuntimeError(f"Item update failed: {str(e)}")
-
-    async def delete_item(self, item_id: str) -> bool:
-        """
-        Delete an item by ID.
-
-        Args:
-            item_id: Unique identifier for the item
-
-        Returns:
-            True if deletion was successful
-
-        Raises:
-            ValueError: If item_id is invalid
-            RuntimeError: If service is not initialized or operation fails
-        """
-        self._ensure_initialized()
-
-        if not item_id or not isinstance(item_id, str):
-            raise ValueError("Valid item_id is required")
-
-        try:
-            self.logger.info(f"Deleting item: {item_id}")
-
-            success = await self._perform_delete(item_id)
-
-            if success:
-                self.logger.info(f"Successfully deleted item: {item_id}")
-            else:
-                self.logger.warning(f"Item not found for deletion: {item_id}")
-
-            return success
-
-        except Exception as e:
-            self.logger.error(f"Failed to delete item {item_id}: {str(e)}")
-            raise RuntimeError(f"Item deletion failed: {str(e)}")
-
-    # Private helper methods
-
-    def _ensure_initialized(self) -> None:
-        """Ensure the service is initialized before operations."""
-        if not self._initialized:
-            raise RuntimeError(f"{self.service_name} is not initialized")
-
-    def _create_client(self):
-        """Create and configure the external client."""
-        # Implement client creation logic
-        # e.g., return ExternalClient(api_key=settings.API_KEY)
-        pass
-
-    async def _setup(self) -> None:
-        """Perform any additional setup operations."""
-        # Implement setup logic
-        pass
-
-    async def _ping_service(self) -> bool:
-        """Ping the external service to check connectivity."""
-        # Implement ping logic
-        return True
-
-    def _validate_create_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate data for item creation."""
-        required_fields = ["name"]  # Define required fields
-
-        for field in required_fields:
-            if field not in data:
-                raise ValueError(f"Missing required field: {field}")
-
-        # Add timestamp
-        data["created_at"] = datetime.utcnow().isoformat()
-
-        return data
-
-    def _validate_update_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate data for item update."""
-        # Remove None values
-        validated_data = {k: v for k, v in data.items() if v is not None}
-
-        if not validated_data:
-            raise ValueError("No valid fields to update")
-
-        # Add timestamp
-        validated_data["updated_at"] = datetime.utcnow().isoformat()
-
-        return validated_data
-
-    async def _perform_create(self, data: Dict[str, Any]) -> dict:
-        """Perform the actual creation operation."""
-        # Implement creation logic
-        # e.g., return await self._client.create(data)
-        return {"id": "example_id", **data}
-
-    async def _perform_get(self, item_id: str) -> Optional[dict]:
-        """Perform the actual retrieval operation."""
-        # Implement retrieval logic
-        # e.g., return await self._client.get(item_id)
-        return None
-
-    async def _perform_list(self, filters: Dict[str, Any], limit: int) -> List[dict]:
-        """Perform the actual listing operation."""
-        # Implement listing logic
-        # e.g., return await self._client.list(filters, limit)
-        return []
-
-    async def _perform_update(self, item_id: str, data: Dict[str, Any]) -> dict:
-        """Perform the actual update operation."""
-        # Implement update logic
-        # e.g., return await self._client.update(item_id, data)
-        return {"id": item_id, **data}
-
-    async def _perform_delete(self, item_id: str) -> bool:
-        """Perform the actual deletion operation."""
-        # Implement deletion logic
-        # e.g., return await self._client.delete(item_id)
-        return True
-
-# Service factory pattern (optional)
-class ServiceFactory:
-    """Factory for creating service instances."""
-
-    _instances: Dict[str, Any] = {}
-
-    @classmethod
-    async def get_service(cls, service_type: str) -> Any:
-        """Get or create a service instance."""
-        if service_type not in cls._instances:
-            if service_type == "example":
-                service = ExampleService()
-                await service.initialize()
-                cls._instances[service_type] = service
-            else:
-                raise ValueError(f"Unknown service type: {service_type}")
-
-        return cls._instances[service_type]
-
-    @classmethod
-    async def health_check_all(cls) -> Dict[str, bool]:
-        """Check health of all initialized services."""
-        results = {}
-        for service_type, service in cls._instances.items():
-            results[service_type] = await service.health_check()
-        return results
+# Rust Service Class Template
+
+Use this template when creating new service classes for external integrations.
+
+## Service with Trait (Recommended for Testability)
+
+```rust
+//! Item service for managing items.
+//!
+//! This module provides the `ItemService` trait and its implementation
+//! for interacting with the item storage backend.
+
+use async_trait::async_trait;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+
+use crate::config::SETTINGS;
+use crate::models::AppError;
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/// Item data structure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Item {
+    pub id: String,
+    pub user_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Request to create an item.
+#[derive(Debug, Clone, Serialize)]
+pub struct CreateItemData {
+    pub user_id: String,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// Request to update an item.
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateItemData {
+    pub name: Option<String>,
+    pub description: Option<String>,
+}
+
+// ============================================================================
+// Trait Definition
+// ============================================================================
+
+/// Trait for item service operations.
+///
+/// This trait defines the interface for item management,
+/// allowing for different implementations (real, mock, etc.).
+#[async_trait]
+pub trait ItemService: Send + Sync {
+    /// List all items for a user.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - The ID of the user whose items to list
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database operation fails.
+    async fn list_for_user(&self, user_id: &str) -> Result<Vec<Item>, AppError>;
+
+    /// Get a single item by ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The item ID
+    /// * `user_id` - The owning user's ID (for authorization)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the item doesn't exist or access is denied.
+    async fn get(&self, id: &str, user_id: &str) -> Result<Option<Item>, AppError>;
+
+    /// Create a new item.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The item data to create
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if creation fails.
+    async fn create(&self, data: &CreateItemData) -> Result<Item, AppError>;
+
+    /// Update an existing item.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The item ID to update
+    /// * `user_id` - The owning user's ID (for authorization)
+    /// * `data` - The fields to update
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the item doesn't exist or update fails.
+    async fn update(
+        &self,
+        id: &str,
+        user_id: &str,
+        data: &UpdateItemData,
+    ) -> Result<Item, AppError>;
+
+    /// Delete an item.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The item ID to delete
+    /// * `user_id` - The owning user's ID (for authorization)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if deletion fails.
+    async fn delete(&self, id: &str, user_id: &str) -> Result<(), AppError>;
+}
+
+// ============================================================================
+// Implementation
+// ============================================================================
+
+/// Supabase-backed implementation of ItemService.
+pub struct SupabaseItemService {
+    client: Client,
+    base_url: String,
+    service_key: String,
+}
+
+impl SupabaseItemService {
+    /// Create a new Supabase item service.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be created.
+    pub fn new() -> Result<Self, AppError> {
+        let client = Client::builder()
+            .build()
+            .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
+
+        Ok(Self {
+            client,
+            base_url: format!("{}/rest/v1", SETTINGS.supabase.url),
+            service_key: SETTINGS.supabase.service_key.clone(),
+        })
+    }
+
+    /// Make an authenticated request to Supabase.
+    fn auth_headers(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("apikey", self.service_key.clone()),
+            ("Authorization", format!("Bearer {}", self.service_key)),
+        ]
+    }
+}
+
+#[async_trait]
+impl ItemService for SupabaseItemService {
+    async fn list_for_user(&self, user_id: &str) -> Result<Vec<Item>, AppError> {
+        let url = format!(
+            "{}/items?user_id=eq.{}&select=*&order=created_at.desc",
+            self.base_url, user_id
+        );
+
+        let mut request = self.client.get(&url);
+        for (key, value) in self.auth_headers() {
+            request = request.header(key, value);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(format!("List failed: {error}")));
+        }
+
+        response
+            .json()
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))
+    }
+
+    async fn get(&self, id: &str, user_id: &str) -> Result<Option<Item>, AppError> {
+        let url = format!(
+            "{}/items?id=eq.{}&user_id=eq.{}&select=*",
+            self.base_url, id, user_id
+        );
+
+        let mut request = self.client.get(&url);
+        for (key, value) in self.auth_headers() {
+            request = request.header(key, value);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(format!("Get failed: {error}")));
+        }
+
+        let items: Vec<Item> = response
+            .json()
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))?;
+
+        Ok(items.into_iter().next())
+    }
+
+    async fn create(&self, data: &CreateItemData) -> Result<Item, AppError> {
+        let url = format!("{}/items", self.base_url);
+
+        let mut request = self.client.post(&url);
+        for (key, value) in self.auth_headers() {
+            request = request.header(key, value);
+        }
+
+        let response = request
+            .header("Content-Type", "application/json")
+            .header("Prefer", "return=representation")
+            .json(data)
+            .send()
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(format!("Create failed: {error}")));
+        }
+
+        let mut items: Vec<Item> = response
+            .json()
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))?;
+
+        items.pop().ok_or_else(|| {
+            AppError::ExternalService("Create returned no data".to_string())
+        })
+    }
+
+    async fn update(
+        &self,
+        id: &str,
+        user_id: &str,
+        data: &UpdateItemData,
+    ) -> Result<Item, AppError> {
+        let url = format!(
+            "{}/items?id=eq.{}&user_id=eq.{}",
+            self.base_url, id, user_id
+        );
+
+        let mut request = self.client.patch(&url);
+        for (key, value) in self.auth_headers() {
+            request = request.header(key, value);
+        }
+
+        let response = request
+            .header("Content-Type", "application/json")
+            .header("Prefer", "return=representation")
+            .json(data)
+            .send()
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(format!("Update failed: {error}")));
+        }
+
+        let mut items: Vec<Item> = response
+            .json()
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))?;
+
+        items.pop().ok_or_else(|| {
+            AppError::NotFound(format!("Item {id} not found"))
+        })
+    }
+
+    async fn delete(&self, id: &str, user_id: &str) -> Result<(), AppError> {
+        let url = format!(
+            "{}/items?id=eq.{}&user_id=eq.{}",
+            self.base_url, id, user_id
+        );
+
+        let mut request = self.client.delete(&url);
+        for (key, value) in self.auth_headers() {
+            request = request.header(key, value);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
+
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(format!("Delete failed: {error}")));
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Factory (Optional)
+// ============================================================================
+
+/// Factory for creating item service instances.
+pub struct ItemServiceFactory;
+
+impl ItemServiceFactory {
+    /// Get the default item service implementation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the service cannot be created.
+    pub fn get_service() -> Result<Box<dyn ItemService>, AppError> {
+        Ok(Box::new(SupabaseItemService::new()?))
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Mock implementation for testing.
+    pub struct MockItemService {
+        items: std::sync::Mutex<Vec<Item>>,
+    }
+
+    impl MockItemService {
+        pub fn new() -> Self {
+            Self {
+                items: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ItemService for MockItemService {
+        async fn list_for_user(&self, user_id: &str) -> Result<Vec<Item>, AppError> {
+            let items = self.items.lock().unwrap();
+            Ok(items
+                .iter()
+                .filter(|i| i.user_id == user_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn get(&self, id: &str, user_id: &str) -> Result<Option<Item>, AppError> {
+            let items = self.items.lock().unwrap();
+            Ok(items
+                .iter()
+                .find(|i| i.id == id && i.user_id == user_id)
+                .cloned())
+        }
+
+        async fn create(&self, data: &CreateItemData) -> Result<Item, AppError> {
+            let item = Item {
+                id: uuid::Uuid::new_v4().to_string(),
+                user_id: data.user_id.clone(),
+                name: data.name.clone(),
+                description: data.description.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            };
+            self.items.lock().unwrap().push(item.clone());
+            Ok(item)
+        }
+
+        async fn update(
+            &self,
+            id: &str,
+            user_id: &str,
+            data: &UpdateItemData,
+        ) -> Result<Item, AppError> {
+            let mut items = self.items.lock().unwrap();
+            let item = items
+                .iter_mut()
+                .find(|i| i.id == id && i.user_id == user_id)
+                .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+
+            if let Some(name) = &data.name {
+                item.name = name.clone();
+            }
+            if let Some(desc) = &data.description {
+                item.description = Some(desc.clone());
+            }
+            item.updated_at = chrono::Utc::now().to_rfc3339();
+
+            Ok(item.clone())
+        }
+
+        async fn delete(&self, id: &str, user_id: &str) -> Result<(), AppError> {
+            let mut items = self.items.lock().unwrap();
+            let pos = items
+                .iter()
+                .position(|i| i.id == id && i.user_id == user_id)
+                .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+            items.remove(pos);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_and_list() {
+        let service = MockItemService::new();
+        let user_id = "user-123";
+
+        let item = service
+            .create(&CreateItemData {
+                user_id: user_id.to_string(),
+                name: "Test Item".to_string(),
+                description: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(item.name, "Test Item");
+
+        let items = service.list_for_user(user_id).await.unwrap();
+        assert_eq!(items.len(), 1);
+    }
+}
 ```
 
-## Key Template Elements
+## Checklist
 
-1. **Abstract base class** with common interface
-2. **Proper initialization** with error handling
-3. **Health check** functionality
-4. **Comprehensive logging** throughout
-5. **Input validation** for all methods
-6. **Error handling** with specific exception types
-7. **Type hints** for better code documentation
-8. **Async/await** patterns for I/O operations
-9. **Private helper methods** for internal logic
-10. **Service factory pattern** for instance management
-11. **Consistent method signatures** across CRUD operations
-12. **Documentation strings** for all public methods
-
-## Usage Example
-
-```python
-# Initialize and use the service
-service = ExampleService()
-await service.initialize()
-
-# Create an item
-item = await service.create_item({"name": "Test Item"})
-
-# Retrieve the item
-retrieved = await service.get_item(item["id"])
-
-# Update the item
-updated = await service.update_item(item["id"], {"name": "Updated Item"})
-
-# Delete the item
-success = await service.delete_item(item["id"])
-```
+- [ ] Trait defined with `#[async_trait]`
+- [ ] All methods have doc comments
+- [ ] Error types properly defined
+- [ ] Implementation handles all error cases
+- [ ] Factory provided for dependency injection
+- [ ] Mock implementation for testing
+- [ ] Unit tests included

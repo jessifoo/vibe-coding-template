@@ -195,7 +195,8 @@ impl Settings {
 
         // Parse Supabase config (required)
         let supabase = SupabaseConfig {
-            url: env::var("SUPABASE_URL").map_err(|_| SettingsError::MissingEnvVar("SUPABASE_URL".to_string()))?,
+            url: env::var("SUPABASE_URL")
+                .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_URL".to_string()))?,
             service_key: env::var("SUPABASE_SERVICE_KEY")
                 .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_SERVICE_KEY".to_string()))?,
             anon_key: env::var("SUPABASE_ANON_KEY").ok(),

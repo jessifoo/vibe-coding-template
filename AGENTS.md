@@ -2,6 +2,40 @@
 
 This is a modern full-stack application template with **Next.js frontend** and **Rust Axum backend**, integrated with Supabase for authentication, database, and storage.
 
+---
+
+## ⚠️ CRITICAL: AI CODING RULES
+
+### NEVER DO THESE (Instant Code Review Failure)
+
+```
+❌ Use `any` type in TypeScript
+❌ Use `.unwrap()` or `.expect()` in Rust (except tests/main)
+❌ Use `// @ts-ignore` or `// @ts-nocheck`
+❌ Leave TODO comments without context
+❌ Commit commented-out code
+❌ Swallow errors silently
+❌ Skip input validation
+❌ Hardcode secrets or API keys
+❌ Use magic numbers without constants
+❌ Skip error handling "for now"
+```
+
+### ALWAYS DO THESE (Required for Every Change)
+
+```
+✅ Run `cargo check` and `cargo clippy` before completing Rust changes
+✅ Run `npm run lint` before completing TypeScript changes
+✅ Add explicit types to all functions
+✅ Handle ALL error cases with proper types
+✅ Log important operations with context
+✅ Validate all inputs at API boundaries
+✅ Document public functions
+✅ Follow existing patterns in the codebase
+```
+
+---
+
 ## Why Rust?
 
 The Rust compiler provides maximum guardrails:
@@ -245,3 +279,48 @@ npm run format  # Formatting (if configured)
 ```
 
 When adding new features, follow the established patterns and maintain consistency with the existing codebase structure.
+
+---
+
+## 🔒 Guardrail Checklist
+
+Before marking any task complete, verify:
+
+### Rust Backend
+- [ ] `cargo check` passes
+- [ ] `cargo clippy` passes (no warnings)
+- [ ] `cargo fmt` has been run
+- [ ] No `.unwrap()` or `.expect()` (except tests)
+- [ ] All errors use `Result<T, AppError>`
+- [ ] Public functions have doc comments
+- [ ] Logging added for important operations
+
+### TypeScript Frontend  
+- [ ] `npm run lint` passes
+- [ ] `npm run build` passes
+- [ ] No `any` types
+- [ ] All components have typed props
+- [ ] Error states handled in UI
+- [ ] Loading states handled in UI
+
+### API Changes
+- [ ] Request validation added
+- [ ] Response types defined
+- [ ] Error responses documented
+- [ ] Authentication verified
+
+### Database Changes
+- [ ] Migration file created
+- [ ] RLS policies defined
+- [ ] Indexes added for queries
+- [ ] Migration reversible (or documented)
+
+---
+
+## 📚 Reference Files
+
+- **AI Guidelines**: `.cursor/rules/ai-guidelines.mdc`
+- **Code Standards**: `CODE_STANDARDS.md`
+- **Backend Rules**: `.cursor/rules/backend/`
+- **Frontend Rules**: `.cursor/rules/frontend/`
+- **Templates**: `.cursor/rules/templates/`

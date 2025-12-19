@@ -177,10 +177,7 @@ impl SupabaseStorageService {
     ///
     /// Returns an error if the deletion fails.
     pub async fn delete_file(&self, path: &str) -> Result<bool, AppError> {
-        let url = format!(
-            "{}/object/{}/{}",
-            self.base_url, self.bucket_name, path
-        );
+        let url = format!("{}/object/{}/{}", self.base_url, self.bucket_name, path);
 
         let response = self
             .client

@@ -2,14 +2,23 @@
 
 This directory contains Cursor rules that provide context-aware guidance for developing with the Vibe Coding Template. These rules help maintain consistency, follow best practices, and accelerate development.
 
+## ⚠️ AI Guidelines
+
+The most important file for AI assistants is **`ai-guidelines.mdc`** which contains:
+- Forbidden practices (things AI must NEVER do)
+- Required practices (things AI must ALWAYS do)
+- Pre-commit checklists
+- Code review criteria
+
 ## Rule Structure
 
 ### Project-wide Rules
 - **`project-overview.mdc`**: Overall project standards and architecture principles (always applied)
+- **`ai-guidelines.mdc`**: AI-specific coding rules and guardrails (always applied)
 - **`development-workflow.mdc`**: Development workflow, commands, and troubleshooting
 
 ### Backend Rules (`backend/`)
-- **`fastapi-standards.mdc`**: FastAPI endpoint patterns and best practices
+- **`fastapi-standards.mdc`**: Rust Axum endpoint patterns and best practices
 - **`supabase-integration.mdc`**: Supabase service usage and patterns
 - **`llm-integration.mdc`**: LLM and embedding service integration
 

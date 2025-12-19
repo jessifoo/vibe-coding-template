@@ -245,12 +245,34 @@ For simpler AI assistance, use the consolidated `AGENTS.md` file that provides:
 
 ## Documentation
 
-- [Cursor Rules Guide](./.cursor/rules/README.md)
-- [AI Agent Instructions](./AGENTS.md)
+### Guidelines & Standards
+- [Code Standards](./CODE_STANDARDS.md) - Comprehensive coding standards
+- [AI Agent Instructions](./AGENTS.md) - Guidelines for AI coding assistants
+- [Cursor Rules Guide](./.cursor/rules/README.md) - Context-aware AI rules
+
+### Project Docs
 - [Authentication Setup Guide](./AuthSetup.md)
 - [Database Migrations](./supabase/README.md)
 - [Project Changelog](./CHANGELOG.md)
 - [Future Improvements](./FutureImprovements.md)
+
+## Linting & Formatting
+
+### Backend (Rust)
+```bash
+cd backend
+cargo check      # Quick compilation check
+cargo clippy     # Linting (must pass with no warnings)
+cargo fmt        # Format code
+cargo test       # Run tests
+```
+
+### Frontend (TypeScript)
+```bash
+cd frontend
+npm run lint     # ESLint (must pass)
+npm run build    # Type check + build
+```
 
 ## License
 

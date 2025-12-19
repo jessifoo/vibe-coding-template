@@ -77,7 +77,11 @@ pub struct TextGenerationRequest {
 
     /// Temperature for generation (0.0-2.0)
     #[serde(default = "default_temperature")]
-    #[validate(range(min = 0.0, max = 2.0, message = "temperature must be between 0.0 and 2.0"))]
+    #[validate(range(
+        min = 0.0,
+        max = 2.0,
+        message = "temperature must be between 0.0 and 2.0"
+    ))]
     pub temperature: f32,
 
     /// LLM provider to use

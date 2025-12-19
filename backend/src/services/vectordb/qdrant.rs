@@ -44,7 +44,9 @@ impl QdrantService {
             // In-memory instance for development/testing
             Qdrant::from_url("http://localhost:6334")
                 .build()
-                .map_err(|e| AppError::Configuration(format!("Failed to create Qdrant client: {e}")))?
+                .map_err(|e| {
+                    AppError::Configuration(format!("Failed to create Qdrant client: {e}"))
+                })?
         };
 
         Ok(Self {
@@ -64,11 +66,10 @@ impl QdrantService {
     /// Returns an error if collection creation fails.
     pub async fn ensure_collection_exists(&self, vector_size: u64) -> Result<(), AppError> {
         // Check if collection exists
-        let collections = self
-            .client
-            .list_collections()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to list collections: {e}")))?;
+        let collections =
+            self.client.list_collections().await.map_err(|e| {
+                AppError::ExternalService(format!("Failed to list collections: {e}"))
+            })?;
 
         let exists = collections
             .collections
@@ -82,7 +83,9 @@ impl QdrantService {
                         .vectors_config(VectorParamsBuilder::new(vector_size, Distance::Cosine)),
                 )
                 .await
-                .map_err(|e| AppError::ExternalService(format!("Failed to create collection: {e}")))?;
+                .map_err(|e| {
+                    AppError::ExternalService(format!("Failed to create collection: {e}"))
+                })?;
 
             tracing::info!(
                 collection = %self.collection_name,
@@ -128,10 +131,7 @@ impl QdrantService {
         }
 
         // Ensure collection exists with appropriate vector size
-        let vector_size = embeddings
-            .first()
-            .map(|e| e.len() as u64)
-            .unwrap_or(1536);
+        let vector_size = embeddings.first().map(|e| e.len() as u64).unwrap_or(1536);
         self.ensure_collection_exists(vector_size).await?;
 
         // Generate IDs and create points
@@ -155,7 +155,9 @@ impl QdrantService {
                 }
                 payload.insert(
                     "document".to_string(),
-                    qdrant_client::qdrant::Value::from(serde_json::to_string(&doc_content).unwrap_or_default()),
+                    qdrant_client::qdrant::Value::from(
+                        serde_json::to_string(&doc_content).unwrap_or_default(),
+                    ),
                 );
 
                 // Add metadata
@@ -214,16 +216,22 @@ impl QdrantService {
             let conditions: Vec<Condition> = params
                 .iter()
                 .map(|(key, value)| {
-                    Condition::matches(key.as_str(), value.to_string().trim_matches('"').to_string())
+                    Condition::matches(
+                        key.as_str(),
+                        value.to_string().trim_matches('"').to_string(),
+                    )
                 })
                 .collect();
 
             Filter::must(conditions)
         });
 
-        let mut search_builder =
-            SearchPointsBuilder::new(&self.collection_name, query_embedding.to_vec(), limit as u64)
-                .with_payload(true);
+        let mut search_builder = SearchPointsBuilder::new(
+            &self.collection_name,
+            query_embedding.to_vec(),
+            limit as u64,
+        )
+        .with_payload(true);
 
         if let Some(f) = filter {
             search_builder = search_builder.filter(f);
@@ -240,9 +248,13 @@ impl QdrantService {
             .into_iter()
             .map(|point| {
                 let id = match point.id {
-                    Some(PointId { point_id_options: Some(id) }) => match id {
+                    Some(PointId {
+                        point_id_options: Some(id),
+                    }) => match id {
                         qdrant_client::qdrant::point_id::PointIdOptions::Uuid(uuid) => uuid,
-                        qdrant_client::qdrant::point_id::PointIdOptions::Num(num) => num.to_string(),
+                        qdrant_client::qdrant::point_id::PointIdOptions::Num(num) => {
+                            num.to_string()
+                        }
                     },
                     _ => String::new(),
                 };
@@ -257,7 +269,8 @@ impl QdrantService {
                     if key == "document" {
                         // Parse document JSON
                         if let Some(s) = extract_string_value(&value) {
-                            if let Ok(doc_map) = serde_json::from_str::<HashMap<String, String>>(&s) {
+                            if let Ok(doc_map) = serde_json::from_str::<HashMap<String, String>>(&s)
+                            {
                                 if let Some(text) = doc_map.get("text") {
                                     document.text = text.clone();
                                 }
@@ -295,13 +308,9 @@ impl QdrantService {
             return Ok(true);
         }
 
-        let points: Vec<PointId> = ids
-            .iter()
-            .map(|id| PointId::from(id.clone()))
-            .collect();
+        let points: Vec<PointId> = ids.iter().map(|id| PointId::from(id.clone())).collect();
 
-        let delete_request = DeletePointsBuilder::new(&self.collection_name)
-            .points(points);
+        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(points);
 
         self.client
             .delete_points(delete_request)

@@ -1,0 +1,234 @@
+---
+description: AI coding assistant guidelines and guardrails
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# AI Coding Guidelines
+
+These guidelines ensure AI assistants produce high-quality, maintainable code.
+
+## 🚫 Absolute Rules (Never Break)
+
+### 1. No Shortcuts or Quick Fixes
+- **NEVER** use `any` type in TypeScript
+- **NEVER** use `.unwrap()` or `.expect()` in Rust (except in tests or main)
+- **NEVER** use `// @ts-ignore` or `// @ts-nocheck`
+- **NEVER** suppress linter warnings without documented justification
+- **NEVER** leave TODO comments without creating an issue/task
+- **NEVER** commit commented-out code
+
+### 2. Type Safety is Non-Negotiable
+- All function parameters must have explicit types
+- All return types must be explicitly declared
+- All API responses must have defined interfaces/structs
+- No implicit `any` or type inference for public APIs
+
+### 3. Error Handling is Required
+- Every error must be handled explicitly
+- Use `Result<T, E>` in Rust, never panic
+- Use try/catch with specific error types in TypeScript
+- Log errors with context before re-throwing
+- Never swallow errors silently
+
+### 4. Security First
+- Never hardcode secrets, API keys, or passwords
+- Always validate and sanitize user input
+- Use parameterized queries for database operations
+- Implement proper authentication checks
+- Follow the principle of least privilege
+
+## ✅ Required Practices
+
+### Code Quality
+```
+Before writing any code:
+1. Read and understand existing patterns in the codebase
+2. Check if similar functionality already exists
+3. Identify the appropriate location for new code
+4. Plan the implementation before coding
+```
+
+### Rust Backend Standards
+```rust
+// ✅ CORRECT: Explicit error handling
+pub async fn get_user(id: &str) -> Result<User, AppError> {
+    let user = db.find(id)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    
+    user.ok_or_else(|| AppError::NotFound(format!("User {id} not found")))
+}
+
+// ❌ WRONG: Using unwrap
+pub async fn get_user(id: &str) -> User {
+    db.find(id).await.unwrap().unwrap()
+}
+```
+
+### TypeScript Frontend Standards
+```typescript
+// ✅ CORRECT: Full type definitions
+interface UserProfile {
+  id: string;
+  email: string;
+  fullName: string | null;
+}
+
+async function fetchUser(id: string): Promise<UserProfile> {
+  const response = await fetch(`/api/users/${id}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch user: ${response.status}`);
+  }
+  return response.json() as Promise<UserProfile>;
+}
+
+// ❌ WRONG: Missing types, no error handling
+async function fetchUser(id) {
+  const response = await fetch(`/api/users/${id}`);
+  return response.json();
+}
+```
+
+### API Endpoint Standards
+```rust
+// Every endpoint must:
+// 1. Validate authentication
+// 2. Validate request body
+// 3. Log the operation
+// 4. Handle all error cases
+// 5. Return typed response
+
+#[axum::debug_handler]
+async fn create_item(
+    headers: HeaderMap,
+    Json(request): Json<CreateItemRequest>,
+) -> Result<Json<ItemResponse>, AppError> {
+    // 1. Authenticate
+    let user = authenticate(&headers).await?;
+    
+    // 2. Validate
+    use validator::Validate;
+    request.validate().map_err(AppError::from)?;
+    
+    // 3. Log
+    tracing::info!(user_id = %user.id, "Creating item");
+    
+    // 4. Execute with error handling
+    let item = service.create(&request)
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    
+    // 5. Return typed response
+    Ok(Json(item))
+}
+```
+
+## 📋 Pre-Commit Checklist
+
+Before considering any code complete:
+
+### Rust Backend
+- [ ] `cargo check` passes with no errors
+- [ ] `cargo clippy` passes with no warnings
+- [ ] `cargo fmt` has been run
+- [ ] All functions have doc comments
+- [ ] All public types have doc comments
+- [ ] No `.unwrap()` or `.expect()` outside of tests
+- [ ] All errors are properly typed and handled
+- [ ] Logging added for important operations
+
+### TypeScript Frontend
+- [ ] `npm run lint` passes
+- [ ] `npm run build` passes
+- [ ] All components have TypeScript interfaces
+- [ ] No `any` types
+- [ ] Error boundaries for async operations
+- [ ] Loading states handled
+- [ ] Accessibility attributes present
+
+### Database Changes
+- [ ] Migration is reversible (or documented why not)
+- [ ] RLS policies defined
+- [ ] Indexes added for query patterns
+- [ ] Foreign key constraints defined
+- [ ] Migration tested locally first
+
+## 🔍 Code Review Criteria
+
+When reviewing AI-generated code, check for:
+
+1. **Correctness**: Does it do what it's supposed to?
+2. **Type Safety**: Are all types explicit and correct?
+3. **Error Handling**: Are all error cases covered?
+4. **Security**: Any potential vulnerabilities?
+5. **Performance**: Any obvious inefficiencies?
+6. **Maintainability**: Is it readable and follows patterns?
+7. **Testing**: Can it be tested? Are edge cases covered?
+
+## 📁 File Organization Rules
+
+### New Files
+- Must be in the correct directory following existing patterns
+- Must be properly imported/exported from module files
+- Must have appropriate file header comments
+
+### File Modifications
+- Understand the existing code before modifying
+- Keep changes focused and minimal
+- Don't refactor unrelated code
+- Preserve existing style and patterns
+
+## 🚨 When in Doubt
+
+1. **Ask for clarification** rather than guessing
+2. **Check existing code** for patterns to follow
+3. **Keep it simple** - avoid over-engineering
+4. **Document assumptions** in comments
+5. **Add TODOs** for future improvements with context
+
+## 🔄 Refactoring Rules
+
+Only refactor when:
+- It's explicitly requested
+- It's necessary for the current task
+- You can verify the refactor doesn't break anything
+
+Never:
+- Refactor "while you're in there"
+- Change code style without reason
+- Rename things without justification
+- Add abstractions prematurely
+
+## 📝 Documentation Requirements
+
+Every public function/method needs:
+```rust
+/// Brief description of what it does.
+///
+/// # Arguments
+///
+/// * `param_name` - Description of parameter
+///
+/// # Returns
+///
+/// Description of return value
+///
+/// # Errors
+///
+/// When and why this function returns errors
+///
+/// # Examples (optional but encouraged)
+///
+/// ```
+/// let result = my_function("input");
+/// ```
+```
+
+## 🧪 Testing Philosophy
+
+- Write tests for business logic
+- Test error cases, not just happy paths
+- Use descriptive test names
+- Keep tests focused and independent
+- Mock external services appropriately

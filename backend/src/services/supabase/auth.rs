@@ -111,7 +111,9 @@ impl SupabaseAuthService {
             })
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Provider token exchange failed: {e}")))?;
+            .map_err(|e| {
+                AppError::ExternalService(format!("Provider token exchange failed: {e}"))
+            })?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
@@ -125,10 +127,9 @@ impl SupabaseAuthService {
             access_token: String,
         }
 
-        let token_response: TokenResponse = response
-            .json()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to parse token response: {e}")))?;
+        let token_response: TokenResponse = response.json().await.map_err(|e| {
+            AppError::ExternalService(format!("Failed to parse token response: {e}"))
+        })?;
 
         Ok(token_response.access_token)
     }

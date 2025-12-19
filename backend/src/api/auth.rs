@@ -65,6 +65,8 @@ fn extract_bearer_token(headers: &HeaderMap) -> Result<String, AppError> {
         .or_else(|| auth_header.strip_prefix("bearer "))
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            AppError::Unauthorized("Invalid Authorization header format. Expected: Bearer <token>".to_string())
+            AppError::Unauthorized(
+                "Invalid Authorization header format. Expected: Bearer <token>".to_string(),
+            )
         })
 }

@@ -89,7 +89,11 @@ impl SupabaseDatabaseService {
     /// # Errors
     ///
     /// Returns an error if the record is not found or the query fails.
-    pub async fn get<T: DeserializeOwned>(&self, table: &str, id: &str) -> Result<Option<T>, AppError> {
+    pub async fn get<T: DeserializeOwned>(
+        &self,
+        table: &str,
+        id: &str,
+    ) -> Result<Option<T>, AppError> {
         let url = format!("{}/{table}?id=eq.{id}&select=*", self.base_url);
 
         let response = self

@@ -1,0 +1,32 @@
+# Rust formatting configuration (stable features only)
+# Run with: cargo fmt
+
+# Edition
+edition = "2021"
+
+# Line width
+max_width = 100
+
+# Tabs vs spaces
+hard_tabs = false
+tab_spaces = 4
+
+# Import reordering
+reorder_imports = true
+reorder_modules = true
+
+# Newline style
+newline_style = "Unix"
+
+# Use shorthand syntax
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+# Chain formatting
+chain_width = 60
+
+# Remove unnecessary parentheses
+remove_nested_parens = true
+
+# Function parameters - use default (Tall when needed)
+fn_params_layout = "Tall"
