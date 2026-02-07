@@ -1,67 +1,63 @@
 [package]
 name = "backend"
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.75"
+edition = "2024"
+rust-version = "1.85"
 description = "Full-stack application backend with Axum, Supabase, and LLM integration"
 license = "MIT"
 
 [dependencies]
 # Web framework
-axum = { version = "0.7", features = ["macros"] }
-axum-extra = { version = "0.9", features = ["typed-header"] }
-tower = { version = "0.4", features = ["timeout", "limit"] }
-tower-http = { version = "0.5", features = ["cors", "trace", "request-id"] }
-hyper = { version = "1.0", features = ["full"] }
+axum = { version = "0.8", features = ["macros"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = { version = "0.5", features = ["timeout", "limit"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id"] }
+hyper = { version = "1", features = ["full"] }
 
 # Async runtime
-tokio = { version = "1.35", features = ["full", "tracing"] }
+tokio = { version = "1", features = ["full", "tracing"] }
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # Configuration
 dotenvy = "0.15"
-config = "0.14"
 
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
 # Validation
-validator = { version = "0.18", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 
 # Error handling
-thiserror = "1.0"
-anyhow = "1.0"
+thiserror = "2"
 
 # Logging/Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # JWT handling
-jsonwebtoken = "9.3"
+jsonwebtoken = "9"
 
 # UUID generation
-uuid = { version = "1.7", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
 
-# Async traits
+# Async traits (no longer needed at runtime with Rust 1.75+ but kept for qdrant-client compat)
 async-trait = "0.1"
 
 # LLM integrations
-async-openai = "0.23"
+async-openai = "0.27"
 
 # Vector database
-qdrant-client = "1.10"
-
-# Once cell for lazy statics
-once_cell = "1.19"
+qdrant-client = "1"
 
 [dev-dependencies]
 tokio-test = "0.4"
+tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 lto = true
@@ -77,10 +73,10 @@ unsafe_code = "forbid"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
-# pedantic = "warn"  # Enable after initial development
-# nursery = "warn"   # Enable after initial development
+pedantic = { level = "warn", priority = -1 }
 unwrap_used = "warn"
 expect_used = "warn"
-# Allow some common patterns during development
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"

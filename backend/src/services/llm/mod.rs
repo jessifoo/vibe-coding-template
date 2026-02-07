@@ -1,6 +1,4 @@
-//! LLM (Large Language Model) services.
-//!
-//! Provides text generation and embedding services via OpenAI and Anthropic.
+//! LLM services — text generation and embeddings.
 
 pub mod embedding;
 #[allow(clippy::module_inception)]

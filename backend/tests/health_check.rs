@@ -1,7 +1,14 @@
-//! Integration test for the health check (ping) endpoint.
+#![allow(clippy::unwrap_used)]
+//! Integration test — health-check (ping) endpoint.
 //!
-//! This test starts the full application and verifies that the health check
-//! endpoint at `/` responds correctly.
+//! Verifies the full application router responds correctly to `GET /`.
+//!
+//! **Requires** these environment variables to be set before running:
+//! - `SUPABASE_URL`
+//! - `SUPABASE_SERVICE_KEY`
+//!
+//! They are needed by the global `SETTINGS` lazy initialisation even though
+//! the health-check endpoint itself does not use Supabase.
 
 use axum::{
     body::Body,
@@ -10,103 +17,68 @@ use axum::{
 use serde_json::Value;
 use tower::ServiceExt;
 
-/// Set up required environment variables for tests.
-///
-/// The SETTINGS lazy static requires SUPABASE_URL and SUPABASE_SERVICE_KEY
-/// to be present, even though the health check doesn't use them.
-fn setup_test_env() {
-    // Only set if not already present to avoid overwriting real values
-    if std::env::var("SUPABASE_URL").is_err() {
-        std::env::set_var("SUPABASE_URL", "https://test.supabase.co");
-    }
-    if std::env::var("SUPABASE_SERVICE_KEY").is_err() {
-        std::env::set_var("SUPABASE_SERVICE_KEY", "test-service-key");
-    }
-    if std::env::var("ENVIRONMENT").is_err() {
-        std::env::set_var("ENVIRONMENT", "development");
-    }
-}
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn health_check_returns_200_with_status_online() {
-    setup_test_env();
-
+async fn returns_200_with_status_online() {
     let app = backend::create_app();
 
-    let response = app
+    let resp = app
         .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(resp.status(), StatusCode::OK);
 
-    // Read response body
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-
-    // Verify response structure
+    let json = body_json(resp).await;
     assert_eq!(json["status"], "online");
     assert!(json["version"].is_string());
     assert!(json["environment"].is_string());
 }
 
 #[tokio::test]
-async fn health_check_returns_correct_environment() {
-    setup_test_env();
-
-    let app = backend::create_app();
-
-    let response = app
-        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-
-    // In test environment, should be "development" (our default)
+async fn returns_correct_environment() {
+    let json = health_json().await;
     assert_eq!(json["environment"], "development");
 }
 
 #[tokio::test]
-async fn health_check_returns_correct_version() {
-    setup_test_env();
-
-    let app = backend::create_app();
-
-    let response = app
-        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap();
-
-    // Version should match Cargo.toml version
+async fn returns_correct_version() {
+    let json = health_json().await;
     assert_eq!(json["version"], env!("CARGO_PKG_VERSION"));
 }
 
 #[tokio::test]
 async fn unknown_route_returns_404() {
-    setup_test_env();
-
-    let app = backend::create_app();
-
-    let response = app
+    let resp = backend::create_app()
         .oneshot(
             Request::builder()
-                .uri("/nonexistent")
+                .uri("/no-such-route")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async fn health_json() -> Value {
+    let resp = backend::create_app()
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    body_json(resp).await
+}
+
+async fn body_json(resp: axum::response::Response) -> Value {
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    serde_json::from_slice(&bytes).unwrap()
 }

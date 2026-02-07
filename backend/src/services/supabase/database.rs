@@ -1,14 +1,15 @@
-//! Supabase database service.
-//!
-//! Generic CRUD operations for Supabase PostgreSQL database via REST API.
+//! Supabase database service — generic CRUD via `PostgREST`.
+
+use std::collections::HashMap;
+use std::fmt::Write;
+
+use reqwest::Client;
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate::config::SETTINGS;
 use crate::models::AppError;
-use reqwest::Client;
-use serde::{de::DeserializeOwned, Serialize};
-use std::collections::HashMap;
 
-/// Service for interacting with Supabase database.
+/// Generic CRUD client for Supabase `PostgreSQL` tables.
 #[derive(Clone)]
 pub struct SupabaseDatabaseService {
     client: Client,
@@ -17,16 +18,15 @@ pub struct SupabaseDatabaseService {
 }
 
 impl SupabaseDatabaseService {
-    /// Create a new database service instance.
+    /// Create a new instance from global settings.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be created.
+    /// Returns [`AppError::Configuration`] if the HTTP client cannot be built.
     pub fn new() -> Result<Self, AppError> {
         let client = Client::builder()
             .build()
-            .map_err(|e| AppError::Configuration(format!("Failed to create HTTP client: {e}")))?;
-
+            .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
         Ok(Self {
             client,
             base_url: format!("{}/rest/v1", SETTINGS.supabase.url),
@@ -34,61 +34,47 @@ impl SupabaseDatabaseService {
         })
     }
 
-    /// List records from a table with optional filters.
-    ///
-    /// # Arguments
-    ///
-    /// * `table` - Table name
-    /// * `filters` - Optional filters (key=value equality)
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
+    // -- helpers ------------------------------------------------------------
+
+    fn auth_headers(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        req.header("apikey", &self.service_key)
+            .bearer_auth(&self.service_key)
+    }
+
+    // -- CRUD ---------------------------------------------------------------
+
+    /// List records, optionally filtered by equality conditions.
     pub async fn list<T: DeserializeOwned>(
         &self,
         table: &str,
         filters: Option<&HashMap<String, String>>,
     ) -> Result<Vec<T>, AppError> {
         let mut url = format!("{}/{table}?select=*", self.base_url);
-
-        if let Some(filters) = filters {
-            for (key, value) in filters {
-                url.push_str(&format!("&{key}=eq.{value}"));
+        if let Some(f) = filters {
+            for (k, v) in f {
+                let _ = write!(url, "&{k}=eq.{v}");
             }
         }
 
-        let response = self
-            .client
-            .get(&url)
-            .header("apikey", &self.service_key)
-            .header("Authorization", format!("Bearer {}", self.service_key))
+        let resp = self
+            .auth_headers(self.client.get(&url))
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Database query failed: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("DB query failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
             return Err(AppError::ExternalService(format!(
-                "Database query failed: {error}"
+                "DB query failed: {body}"
             )));
         }
 
-        response
-            .json()
+        resp.json()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to parse response: {e}")))
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))
     }
 
-    /// Get a single record by ID.
-    ///
-    /// # Arguments
-    ///
-    /// * `table` - Table name
-    /// * `id` - Record ID
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the record is not found or the query fails.
+    /// Get a single record by primary key.
     pub async fn get<T: DeserializeOwned>(
         &self,
         table: &str,
@@ -96,45 +82,30 @@ impl SupabaseDatabaseService {
     ) -> Result<Option<T>, AppError> {
         let url = format!("{}/{table}?id=eq.{id}&select=*", self.base_url);
 
-        let response = self
-            .client
-            .get(&url)
-            .header("apikey", &self.service_key)
-            .header("Authorization", format!("Bearer {}", self.service_key))
+        let resp = self
+            .auth_headers(self.client.get(&url))
             .header("Accept", "application/vnd.pgrst.object+json")
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Database query failed: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("DB query failed: {e}")))?;
 
-        if response.status() == reqwest::StatusCode::NOT_ACCEPTABLE {
-            // No record found
+        if resp.status() == reqwest::StatusCode::NOT_ACCEPTABLE {
             return Ok(None);
         }
-
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
             return Err(AppError::ExternalService(format!(
-                "Database query failed: {error}"
+                "DB query failed: {body}"
             )));
         }
 
-        response
-            .json()
+        resp.json()
             .await
             .map(Some)
-            .map_err(|e| AppError::ExternalService(format!("Failed to parse response: {e}")))
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))
     }
 
-    /// Create a new record.
-    ///
-    /// # Arguments
-    ///
-    /// * `table` - Table name
-    /// * `data` - Record data to insert
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the insert fails.
+    /// Insert a new record, returning the created row.
     pub async fn create<T: DeserializeOwned, D: Serialize>(
         &self,
         table: &str,
@@ -142,47 +113,31 @@ impl SupabaseDatabaseService {
     ) -> Result<T, AppError> {
         let url = format!("{}/{table}", self.base_url);
 
-        let response = self
-            .client
-            .post(&url)
-            .header("apikey", &self.service_key)
-            .header("Authorization", format!("Bearer {}", self.service_key))
-            .header("Content-Type", "application/json")
+        let resp = self
+            .auth_headers(self.client.post(&url))
             .header("Prefer", "return=representation")
             .json(data)
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Database insert failed: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("DB insert failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
             return Err(AppError::ExternalService(format!(
-                "Database insert failed: {error}"
+                "DB insert failed: {body}"
             )));
         }
 
-        // Response is an array, get first element
-        let mut records: Vec<T> = response
+        let mut rows: Vec<T> = resp
             .json()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to parse response: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))?;
 
-        records
-            .pop()
-            .ok_or_else(|| AppError::ExternalService("Insert returned no data".to_string()))
+        rows.pop()
+            .ok_or_else(|| AppError::ExternalService("Insert returned no data".into()))
     }
 
-    /// Update a record by ID.
-    ///
-    /// # Arguments
-    ///
-    /// * `table` - Table name
-    /// * `id` - Record ID
-    /// * `data` - Fields to update
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the update fails.
+    /// Update a record by primary key, returning the updated row.
     pub async fn update<T: DeserializeOwned, D: Serialize>(
         &self,
         table: &str,
@@ -191,76 +146,47 @@ impl SupabaseDatabaseService {
     ) -> Result<T, AppError> {
         let url = format!("{}/{table}?id=eq.{id}", self.base_url);
 
-        let response = self
-            .client
-            .patch(&url)
-            .header("apikey", &self.service_key)
-            .header("Authorization", format!("Bearer {}", self.service_key))
-            .header("Content-Type", "application/json")
+        let resp = self
+            .auth_headers(self.client.patch(&url))
             .header("Prefer", "return=representation")
             .json(data)
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Database update failed: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("DB update failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
             return Err(AppError::ExternalService(format!(
-                "Database update failed: {error}"
+                "DB update failed: {body}"
             )));
         }
 
-        let mut records: Vec<T> = response
+        let mut rows: Vec<T> = resp
             .json()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to parse response: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))?;
 
-        records
-            .pop()
-            .ok_or_else(|| AppError::NotFound(format!("Record with ID {id} not found")))
+        rows.pop()
+            .ok_or_else(|| AppError::NotFound(format!("Record {id} not found")))
     }
 
-    /// Delete a record by ID.
-    ///
-    /// # Arguments
-    ///
-    /// * `table` - Table name
-    /// * `id` - Record ID
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the delete fails.
+    /// Delete a record by primary key.
     pub async fn delete(&self, table: &str, id: &str) -> Result<bool, AppError> {
         let url = format!("{}/{table}?id=eq.{id}", self.base_url);
 
-        let response = self
-            .client
-            .delete(&url)
-            .header("apikey", &self.service_key)
-            .header("Authorization", format!("Bearer {}", self.service_key))
+        let resp = self
+            .auth_headers(self.client.delete(&url))
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Database delete failed: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("DB delete failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
             return Err(AppError::ExternalService(format!(
-                "Database delete failed: {error}"
+                "DB delete failed: {body}"
             )));
         }
 
         Ok(true)
-    }
-}
-
-impl Default for SupabaseDatabaseService {
-    /// Create a default database service.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the HTTP client cannot be created.
-    #[allow(clippy::expect_used)]
-    fn default() -> Self {
-        Self::new().expect("Failed to create default SupabaseDatabaseService")
     }
 }

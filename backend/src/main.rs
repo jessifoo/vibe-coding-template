@@ -2,7 +2,7 @@
 //!
 //! A Rust backend built with Axum, featuring:
 //! - Supabase authentication and database integration
-//! - LLM text generation (OpenAI, Anthropic)
+//! - LLM text generation (`OpenAI`, Anthropic)
 //! - Vector database semantic search (Qdrant)
 //!
 //! The Rust type system and compiler provide strong guardrails that prevent

@@ -1,7 +1,4 @@
-//! API request and response models.
-//!
-//! All models use serde for serialization and validator for validation.
-//! The Rust type system ensures these models are always valid at compile time.
+//! Request/response models and error types.
 
 pub mod auth;
 pub mod error;

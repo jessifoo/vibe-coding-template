@@ -1,6 +1,4 @@
-//! Supabase service integrations.
-//!
-//! Provides authentication, database, and storage services via Supabase.
+//! Supabase service integrations (auth, database, storage).
 
 pub mod auth;
 pub mod database;

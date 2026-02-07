@@ -1,9 +1,9 @@
-//! Application services module.
+//! External-service integrations.
 //!
-//! Contains all external service integrations including:
-//! - Supabase (auth, database, storage)
-//! - LLM providers (OpenAI, Anthropic)
-//! - Vector database (Qdrant)
+//! Each sub-module owns a single external dependency:
+//! - [`supabase`] — authentication, database, storage
+//! - [`llm`] — text generation and embeddings (`OpenAI`, Anthropic)
+//! - [`vectordb`] — semantic search (Qdrant)
 
 pub mod llm;
 pub mod supabase;

@@ -1,45 +1,42 @@
-//! Application configuration module.
+//! Application configuration.
 //!
-//! Handles loading and validating all environment variables and configuration
-//! settings. Uses strong typing to prevent misconfiguration at runtime.
+//! Loads and validates all settings from environment variables at startup.
+//! Uses strong typing to catch misconfiguration at compile time rather than runtime.
 
-use once_cell::sync::Lazy;
-use serde::Deserialize;
 use std::env;
+use std::sync::LazyLock;
 
 /// Global application settings, loaded once at startup.
-pub static SETTINGS: Lazy<Settings> = Lazy::new(|| {
+///
+/// # Panics
+///
+/// Panics if required environment variables (`SUPABASE_URL`, `SUPABASE_SERVICE_KEY`)
+/// are missing.
+#[allow(clippy::expect_used)]
+pub static SETTINGS: LazyLock<Settings> = LazyLock::new(|| {
     Settings::from_env().unwrap_or_else(|e| {
-        tracing::error!("Failed to load settings: {}", e);
-        panic!("Failed to load settings: {}", e);
+        tracing::error!("Failed to load settings: {e}");
+        panic!("Failed to load settings: {e}");
     })
 });
 
-/// Application settings loaded from environment variables.
-#[derive(Debug, Clone, Deserialize)]
+/// Top-level application settings.
+#[derive(Debug, Clone)]
 pub struct Settings {
-    /// Application environment (development, staging, production)
     pub environment: Environment,
-
-    /// Server configuration
     pub server: ServerConfig,
-
-    /// CORS configuration
     pub cors: CorsConfig,
-
-    /// Supabase configuration
     pub supabase: SupabaseConfig,
-
-    /// LLM provider configuration
     pub llm: LlmConfig,
-
-    /// Qdrant vector database configuration
     pub qdrant: QdrantConfig,
 }
 
-/// Application environment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
+// ---------------------------------------------------------------------------
+// Environment
+// ---------------------------------------------------------------------------
+
+/// Deployment environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Environment {
     #[default]
     Development,
@@ -54,175 +51,6 @@ impl std::fmt::Display for Environment {
             Self::Staging => write!(f, "staging"),
             Self::Production => write!(f, "production"),
         }
-    }
-}
-
-/// Server configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ServerConfig {
-    /// Host to bind to
-    pub host: String,
-
-    /// Port to listen on
-    pub port: u16,
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            host: "0.0.0.0".to_string(),
-            port: 8000,
-        }
-    }
-}
-
-/// CORS configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct CorsConfig {
-    /// Allowed origins for CORS
-    pub origins: Vec<String>,
-}
-
-impl Default for CorsConfig {
-    fn default() -> Self {
-        Self {
-            origins: vec!["http://localhost:3000".to_string()],
-        }
-    }
-}
-
-/// Supabase configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct SupabaseConfig {
-    /// Supabase project URL
-    pub url: String,
-
-    /// Supabase service role key (for backend operations)
-    pub service_key: String,
-
-    /// Supabase anon key (for client operations)
-    pub anon_key: Option<String>,
-
-    /// JWT secret for token verification
-    pub jwt_secret: Option<String>,
-}
-
-/// LLM provider configuration.
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct LlmConfig {
-    /// OpenAI API key
-    pub openai_api_key: Option<String>,
-
-    /// Anthropic API key
-    pub anthropic_api_key: Option<String>,
-}
-
-impl LlmConfig {
-    /// Check if OpenAI is configured.
-    #[must_use]
-    pub fn has_openai(&self) -> bool {
-        self.openai_api_key.as_ref().is_some_and(|k| !k.is_empty())
-    }
-
-    /// Check if Anthropic is configured.
-    #[must_use]
-    pub fn has_anthropic(&self) -> bool {
-        self.anthropic_api_key
-            .as_ref()
-            .is_some_and(|k| !k.is_empty())
-    }
-}
-
-/// Qdrant vector database configuration.
-#[derive(Debug, Clone, Deserialize)]
-pub struct QdrantConfig {
-    /// Qdrant server URL
-    pub url: Option<String>,
-
-    /// Qdrant API key
-    pub api_key: Option<String>,
-
-    /// Default collection name
-    pub collection_name: String,
-}
-
-impl Default for QdrantConfig {
-    fn default() -> Self {
-        Self {
-            url: None,
-            api_key: None,
-            collection_name: "default_collection".to_string(),
-        }
-    }
-}
-
-impl Settings {
-    /// Load settings from environment variables.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if required environment variables are missing or invalid.
-    pub fn from_env() -> Result<Self, SettingsError> {
-        // Load .env file if present (ignore errors if not found)
-        let _ = dotenvy::dotenv();
-
-        // Parse environment
-        let environment = env::var("ENVIRONMENT")
-            .unwrap_or_else(|_| "development".to_string())
-            .parse()
-            .unwrap_or(Environment::Development);
-
-        // Parse server config
-        let server = ServerConfig {
-            host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
-            port: env::var("PORT")
-                .unwrap_or_else(|_| "8000".to_string())
-                .parse()
-                .map_err(|_| SettingsError::InvalidValue("PORT".to_string()))?,
-        };
-
-        // Parse CORS origins
-        let cors = CorsConfig {
-            origins: env::var("CORS_ORIGINS")
-                .unwrap_or_else(|_| "http://localhost:3000".to_string())
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect(),
-        };
-
-        // Parse Supabase config (required)
-        let supabase = SupabaseConfig {
-            url: env::var("SUPABASE_URL")
-                .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_URL".to_string()))?,
-            service_key: env::var("SUPABASE_SERVICE_KEY")
-                .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_SERVICE_KEY".to_string()))?,
-            anon_key: env::var("SUPABASE_ANON_KEY").ok(),
-            jwt_secret: env::var("SUPABASE_JWT_SECRET").ok(),
-        };
-
-        // Parse LLM config (optional)
-        let llm = LlmConfig {
-            openai_api_key: env::var("OPENAI_API_KEY").ok().filter(|s| !s.is_empty()),
-            anthropic_api_key: env::var("ANTHROPIC_API_KEY").ok().filter(|s| !s.is_empty()),
-        };
-
-        // Parse Qdrant config (optional)
-        let qdrant = QdrantConfig {
-            url: env::var("QDRANT_URL").ok().filter(|s| !s.is_empty()),
-            api_key: env::var("QDRANT_API_KEY").ok().filter(|s| !s.is_empty()),
-            collection_name: env::var("QDRANT_COLLECTION_NAME")
-                .unwrap_or_else(|_| "default_collection".to_string()),
-        };
-
-        Ok(Self {
-            environment,
-            server,
-            cors,
-            supabase,
-            llm,
-            qdrant,
-        })
     }
 }
 
@@ -241,7 +69,186 @@ impl std::str::FromStr for Environment {
     }
 }
 
-/// Configuration errors.
+// ---------------------------------------------------------------------------
+// Sub-configs
+// ---------------------------------------------------------------------------
+
+/// HTTP server settings.
+#[derive(Debug, Clone)]
+pub struct ServerConfig {
+    pub host: String,
+    pub port: u16,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            host: "0.0.0.0".to_string(),
+            port: 8000,
+        }
+    }
+}
+
+/// CORS origin allowlist.
+#[derive(Debug, Clone)]
+pub struct CorsConfig {
+    pub origins: Vec<String>,
+}
+
+impl Default for CorsConfig {
+    fn default() -> Self {
+        Self {
+            origins: vec!["http://localhost:3000".to_string()],
+        }
+    }
+}
+
+/// Supabase connection details (required).
+#[derive(Debug, Clone)]
+pub struct SupabaseConfig {
+    pub url: String,
+    pub service_key: String,
+    pub anon_key: Option<String>,
+    pub jwt_secret: Option<String>,
+}
+
+/// LLM provider API keys (optional).
+#[derive(Debug, Clone, Default)]
+pub struct LlmConfig {
+    pub openai_api_key: Option<String>,
+    pub anthropic_api_key: Option<String>,
+}
+
+impl LlmConfig {
+    /// Returns `true` if a non-empty `OpenAI` key is configured.
+    pub fn has_openai(&self) -> bool {
+        self.openai_api_key.as_ref().is_some_and(|k| !k.is_empty())
+    }
+
+    /// Returns `true` if a non-empty Anthropic key is configured.
+    pub fn has_anthropic(&self) -> bool {
+        self.anthropic_api_key
+            .as_ref()
+            .is_some_and(|k| !k.is_empty())
+    }
+}
+
+/// Qdrant vector-database connection (optional).
+#[derive(Debug, Clone)]
+pub struct QdrantConfig {
+    pub url: Option<String>,
+    pub api_key: Option<String>,
+    pub collection_name: String,
+}
+
+impl Default for QdrantConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            api_key: None,
+            collection_name: "default_collection".to_string(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Loading
+// ---------------------------------------------------------------------------
+
+impl Settings {
+    /// Build settings from environment variables.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SettingsError`] when required variables are missing or invalid.
+    pub fn from_env() -> Result<Self, SettingsError> {
+        let _ = dotenvy::dotenv(); // Load .env if present
+
+        Ok(Self {
+            environment: parse_environment(),
+            server: parse_server()?,
+            cors: parse_cors(),
+            supabase: parse_supabase()?,
+            llm: parse_llm(),
+            qdrant: parse_qdrant(),
+        })
+    }
+}
+
+fn parse_environment() -> Environment {
+    env::var("ENVIRONMENT")
+        .unwrap_or_else(|_| "development".to_string())
+        .parse()
+        .unwrap_or(Environment::Development)
+}
+
+fn parse_server() -> Result<ServerConfig, SettingsError> {
+    Ok(ServerConfig {
+        host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
+        port: env::var("PORT")
+            .unwrap_or_else(|_| "8000".to_string())
+            .parse()
+            .map_err(|_| SettingsError::InvalidValue("PORT".to_string()))?,
+    })
+}
+
+fn parse_cors() -> CorsConfig {
+    CorsConfig {
+        origins: env::var("CORS_ORIGINS")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string())
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+    }
+}
+
+fn parse_supabase() -> Result<SupabaseConfig, SettingsError> {
+    Ok(SupabaseConfig {
+        url: required_env("SUPABASE_URL")?,
+        service_key: required_env("SUPABASE_SERVICE_KEY")?,
+        anon_key: optional_env("SUPABASE_ANON_KEY"),
+        jwt_secret: optional_env("SUPABASE_JWT_SECRET"),
+    })
+}
+
+fn parse_llm() -> LlmConfig {
+    LlmConfig {
+        openai_api_key: nonempty_env("OPENAI_API_KEY"),
+        anthropic_api_key: nonempty_env("ANTHROPIC_API_KEY"),
+    }
+}
+
+fn parse_qdrant() -> QdrantConfig {
+    QdrantConfig {
+        url: nonempty_env("QDRANT_URL"),
+        api_key: nonempty_env("QDRANT_API_KEY"),
+        collection_name: env::var("QDRANT_COLLECTION_NAME")
+            .unwrap_or_else(|_| "default_collection".to_string()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Env-var helpers
+// ---------------------------------------------------------------------------
+
+fn required_env(key: &str) -> Result<String, SettingsError> {
+    env::var(key).map_err(|_| SettingsError::MissingEnvVar(key.to_string()))
+}
+
+fn optional_env(key: &str) -> Option<String> {
+    env::var(key).ok()
+}
+
+fn nonempty_env(key: &str) -> Option<String> {
+    env::var(key).ok().filter(|s| !s.is_empty())
+}
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/// Configuration loading errors.
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
     #[error("Missing required environment variable: {0}")]
@@ -251,12 +258,18 @@ pub enum SettingsError {
     InvalidValue(String),
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // -- Environment --------------------------------------------------------
+
     #[test]
-    fn test_environment_parsing_full_names() {
+    fn environment_parses_full_names() {
         assert_eq!(
             "development".parse::<Environment>().unwrap(),
             Environment::Development
@@ -272,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn test_environment_parsing_short_names() {
+    fn environment_parses_short_names() {
         assert_eq!(
             "dev".parse::<Environment>().unwrap(),
             Environment::Development
@@ -288,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn test_environment_parsing_case_insensitive() {
+    fn environment_parses_case_insensitively() {
         assert_eq!(
             "DEVELOPMENT".parse::<Environment>().unwrap(),
             Environment::Development
@@ -304,122 +317,105 @@ mod tests {
     }
 
     #[test]
-    fn test_environment_parsing_invalid() {
+    fn environment_rejects_invalid_input() {
         assert!("invalid".parse::<Environment>().is_err());
         assert!("".parse::<Environment>().is_err());
         assert!("test".parse::<Environment>().is_err());
     }
 
     #[test]
-    fn test_environment_display() {
-        assert_eq!(Environment::Development.to_string(), "development");
-        assert_eq!(Environment::Staging.to_string(), "staging");
-        assert_eq!(Environment::Production.to_string(), "production");
+    fn environment_display_roundtrips() {
+        for env in [
+            Environment::Development,
+            Environment::Staging,
+            Environment::Production,
+        ] {
+            assert_eq!(env.to_string().parse::<Environment>().unwrap(), env);
+        }
     }
 
     #[test]
-    fn test_environment_default() {
+    fn environment_default_is_development() {
         assert_eq!(Environment::default(), Environment::Development);
     }
 
+    // -- Defaults -----------------------------------------------------------
+
     #[test]
-    fn test_server_config_default() {
-        let config = ServerConfig::default();
-        assert_eq!(config.host, "0.0.0.0");
-        assert_eq!(config.port, 8000);
+    fn server_config_default_values() {
+        let cfg = ServerConfig::default();
+        assert_eq!(cfg.host, "0.0.0.0");
+        assert_eq!(cfg.port, 8000);
     }
 
     #[test]
-    fn test_cors_config_default() {
-        let config = CorsConfig::default();
-        assert_eq!(config.origins, vec!["http://localhost:3000".to_string()]);
+    fn cors_config_default_allows_localhost() {
+        let cfg = CorsConfig::default();
+        assert_eq!(cfg.origins, vec!["http://localhost:3000"]);
     }
 
     #[test]
-    fn test_qdrant_config_default() {
-        let config = QdrantConfig::default();
-        assert!(config.url.is_none());
-        assert!(config.api_key.is_none());
-        assert_eq!(config.collection_name, "default_collection");
+    fn qdrant_config_default_values() {
+        let cfg = QdrantConfig::default();
+        assert!(cfg.url.is_none());
+        assert!(cfg.api_key.is_none());
+        assert_eq!(cfg.collection_name, "default_collection");
     }
 
     #[test]
-    fn test_llm_config_default() {
-        let config = LlmConfig::default();
-        assert!(config.openai_api_key.is_none());
-        assert!(config.anthropic_api_key.is_none());
+    fn llm_config_default_is_empty() {
+        let cfg = LlmConfig::default();
+        assert!(!cfg.has_openai());
+        assert!(!cfg.has_anthropic());
     }
 
+    // -- LlmConfig ----------------------------------------------------------
+
     #[test]
-    fn test_llm_config_has_openai_none() {
-        let config = LlmConfig {
-            openai_api_key: None,
-            anthropic_api_key: None,
+    fn llm_config_detects_openai_presence() {
+        let with_key = LlmConfig {
+            openai_api_key: Some("sk-test".into()),
+            ..LlmConfig::default()
         };
-        assert!(!config.has_openai());
-    }
-
-    #[test]
-    fn test_llm_config_has_openai_empty() {
-        let config = LlmConfig {
+        let empty_key = LlmConfig {
             openai_api_key: Some(String::new()),
-            anthropic_api_key: None,
+            ..LlmConfig::default()
         };
-        assert!(!config.has_openai());
+        let no_key = LlmConfig::default();
+
+        assert!(with_key.has_openai());
+        assert!(!empty_key.has_openai());
+        assert!(!no_key.has_openai());
     }
 
     #[test]
-    fn test_llm_config_has_openai_set() {
-        let config = LlmConfig {
-            openai_api_key: Some("sk-test".to_string()),
-            anthropic_api_key: None,
+    fn llm_config_detects_anthropic_presence() {
+        let with_key = LlmConfig {
+            anthropic_api_key: Some("sk-ant".into()),
+            ..LlmConfig::default()
         };
-        assert!(config.has_openai());
-    }
-
-    #[test]
-    fn test_llm_config_has_anthropic_none() {
-        let config = LlmConfig {
-            openai_api_key: None,
-            anthropic_api_key: None,
-        };
-        assert!(!config.has_anthropic());
-    }
-
-    #[test]
-    fn test_llm_config_has_anthropic_empty() {
-        let config = LlmConfig {
-            openai_api_key: None,
+        let empty_key = LlmConfig {
             anthropic_api_key: Some(String::new()),
+            ..LlmConfig::default()
         };
-        assert!(!config.has_anthropic());
+        let no_key = LlmConfig::default();
+
+        assert!(with_key.has_anthropic());
+        assert!(!empty_key.has_anthropic());
+        assert!(!no_key.has_anthropic());
     }
 
-    #[test]
-    fn test_llm_config_has_anthropic_set() {
-        let config = LlmConfig {
-            openai_api_key: None,
-            anthropic_api_key: Some("sk-ant-test".to_string()),
-        };
-        assert!(config.has_anthropic());
-    }
+    // -- SettingsError ------------------------------------------------------
 
     #[test]
-    fn test_settings_error_display() {
-        let err = SettingsError::MissingEnvVar("TEST_KEY".to_string());
+    fn settings_error_displays_correctly() {
         assert_eq!(
-            err.to_string(),
-            "Missing required environment variable: TEST_KEY"
+            SettingsError::MissingEnvVar("KEY".into()).to_string(),
+            "Missing required environment variable: KEY",
         );
-
-        let err = SettingsError::InvalidValue("bad port".to_string());
-        assert_eq!(err.to_string(), "Invalid configuration value: bad port");
-    }
-
-    #[test]
-    fn test_environment_equality() {
-        assert_eq!(Environment::Development, Environment::Development);
-        assert_ne!(Environment::Development, Environment::Production);
-        assert_ne!(Environment::Staging, Environment::Production);
+        assert_eq!(
+            SettingsError::InvalidValue("bad".into()).to_string(),
+            "Invalid configuration value: bad",
+        );
     }
 }

@@ -1,6 +1,6 @@
-//! API routes module.
+//! API route definitions.
 //!
-//! Contains all HTTP endpoint handlers organized by domain.
+//! Each sub-module owns a single domain and exposes a [`Router`](axum::Router).
 
 pub mod auth;
 pub mod llm;
@@ -8,7 +8,7 @@ pub mod vectordb;
 
 use axum::Router;
 
-/// Create the main API router with all sub-routes.
+/// Assemble the top-level `/api` router from all domain routers.
 pub fn create_router() -> Router {
     Router::new()
         .nest("/auth", auth::router())

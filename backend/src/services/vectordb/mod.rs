@@ -1,6 +1,4 @@
-//! Vector database services.
-//!
-//! Provides semantic search capabilities via Qdrant.
+//! Vector-database services (Qdrant).
 
 pub mod qdrant;
 

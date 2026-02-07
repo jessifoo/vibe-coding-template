@@ -1,14 +1,19 @@
-//! Supabase storage service.
-//!
-//! Handles file uploads and management via Supabase Storage.
+//! Supabase storage service — file upload, download, listing.
 
-use crate::config::SETTINGS;
-use crate::models::AppError;
 use reqwest::Client;
 use serde::Deserialize;
 use uuid::Uuid;
 
-/// Service for interacting with Supabase Storage.
+use crate::config::SETTINGS;
+use crate::models::AppError;
+
+#[derive(serde::Serialize)]
+struct CreateBucket<'a> {
+    name: &'a str,
+    public: bool,
+}
+
+/// Client for the Supabase Storage API.
 #[derive(Clone)]
 pub struct SupabaseStorageService {
     client: Client,
@@ -18,20 +23,15 @@ pub struct SupabaseStorageService {
 }
 
 impl SupabaseStorageService {
-    /// Create a new storage service instance.
-    ///
-    /// # Arguments
-    ///
-    /// * `bucket_name` - Name of the storage bucket
+    /// Create a new storage service for `bucket_name`.
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be created.
+    /// Returns [`AppError::Configuration`] if the HTTP client cannot be built.
     pub fn new(bucket_name: &str) -> Result<Self, AppError> {
         let client = Client::builder()
             .build()
-            .map_err(|e| AppError::Configuration(format!("Failed to create HTTP client: {e}")))?;
-
+            .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
         Ok(Self {
             client,
             base_url: format!("{}/storage/v1", SETTINGS.supabase.url),
@@ -40,79 +40,52 @@ impl SupabaseStorageService {
         })
     }
 
+    // -- helpers ------------------------------------------------------------
+
+    fn auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        req.header("apikey", &self.service_key)
+            .bearer_auth(&self.service_key)
+    }
+
+    // -- operations ---------------------------------------------------------
+
     /// Ensure the bucket exists, creating it if necessary.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the bucket creation fails.
     pub async fn ensure_bucket_exists(&self) -> Result<(), AppError> {
-        // Try to get the bucket
         let url = format!("{}/bucket/{}", self.base_url, self.bucket_name);
 
-        let response = self
-            .client
-            .get(&url)
-            .header("apikey", &self.service_key)
-            .header("Authorization", format!("Bearer {}", self.service_key))
+        let resp = self
+            .auth(self.client.get(&url))
             .send()
             .await
             .map_err(|e| AppError::ExternalService(format!("Storage request failed: {e}")))?;
 
-        if response.status().is_success() {
+        if resp.status().is_success() {
             return Ok(());
         }
 
-        // Bucket doesn't exist, create it
         let create_url = format!("{}/bucket", self.base_url);
-
-        #[derive(serde::Serialize)]
-        struct CreateBucketRequest<'a> {
-            name: &'a str,
-            public: bool,
-        }
-
-        let response = self
-            .client
-            .post(&create_url)
-            .header("apikey", &self.service_key)
-            .header("Authorization", format!("Bearer {}", self.service_key))
-            .json(&CreateBucketRequest {
+        let resp = self
+            .auth(self.client.post(&create_url))
+            .json(&CreateBucket {
                 name: &self.bucket_name,
                 public: false,
             })
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to create bucket: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("Bucket creation failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            // Ignore "already exists" errors
-            if !error.contains("already exists") {
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            if !body.contains("already exists") {
                 return Err(AppError::ExternalService(format!(
-                    "Failed to create bucket: {error}"
+                    "Bucket creation failed: {body}"
                 )));
             }
         }
-
         Ok(())
     }
 
-    /// Upload a file to storage.
-    ///
-    /// # Arguments
-    ///
-    /// * `filename` - Original filename
-    /// * `content` - File content bytes
-    /// * `content_type` - MIME type
-    /// * `path` - Optional path prefix within the bucket
-    ///
-    /// # Returns
-    ///
-    /// The public URL of the uploaded file.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the upload fails.
+    /// Upload a file and return its public URL.
     pub async fn upload_file(
         &self,
         filename: &str,
@@ -120,146 +93,91 @@ impl SupabaseStorageService {
         content_type: &str,
         path: Option<&str>,
     ) -> Result<String, AppError> {
-        // Generate unique filename
-        let unique_filename = format!("{}-{filename}", Uuid::new_v4());
-        let full_path = match path {
-            Some(p) => format!("{p}/{unique_filename}"),
-            None => unique_filename,
-        };
+        let unique = format!("{}-{filename}", Uuid::new_v4());
+        let full_path = path.map_or_else(|| unique.clone(), |p| format!("{p}/{unique}"));
 
         let url = format!(
             "{}/object/{}/{}",
             self.base_url, self.bucket_name, full_path
         );
 
-        let response = self
-            .client
-            .post(&url)
-            .header("apikey", &self.service_key)
-            .header("Authorization", format!("Bearer {}", self.service_key))
+        let resp = self
+            .auth(self.client.post(&url))
             .header("Content-Type", content_type)
             .body(content)
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("File upload failed: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("Upload failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            return Err(AppError::ExternalService(format!(
-                "File upload failed: {error}"
-            )));
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(format!("Upload failed: {body}")));
         }
 
-        // Return public URL
-        Ok(self.get_public_url(&full_path))
+        Ok(self.public_url(&full_path))
     }
 
-    /// Get the public URL for a file.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - File path within the bucket
-    #[must_use]
-    pub fn get_public_url(&self, path: &str) -> String {
+    /// Build the public URL for a stored object.
+    pub fn public_url(&self, path: &str) -> String {
         format!(
-            "{}/object/public/{}/{}",
-            self.base_url, self.bucket_name, path
+            "{}/object/public/{}/{path}",
+            self.base_url, self.bucket_name
         )
     }
 
-    /// Delete a file from storage.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - File path within the bucket
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the deletion fails.
+    /// Delete a file from the bucket.
     pub async fn delete_file(&self, path: &str) -> Result<bool, AppError> {
-        let url = format!("{}/object/{}/{}", self.base_url, self.bucket_name, path);
-
-        let response = self
-            .client
-            .delete(&url)
-            .header("apikey", &self.service_key)
-            .header("Authorization", format!("Bearer {}", self.service_key))
+        let url = format!("{}/object/{}/{path}", self.base_url, self.bucket_name);
+        let resp = self
+            .auth(self.client.delete(&url))
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("File deletion failed: {e}")))?;
-
-        Ok(response.status().is_success())
+            .map_err(|e| AppError::ExternalService(format!("Delete failed: {e}")))?;
+        Ok(resp.status().is_success())
     }
 
-    /// List files in a directory.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - Directory path (optional)
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the listing fails.
+    /// List files under an optional directory prefix.
     pub async fn list_files(&self, path: Option<&str>) -> Result<Vec<FileInfo>, AppError> {
-        let url = format!("{}/object/list/{}", self.base_url, self.bucket_name);
-
         #[derive(serde::Serialize)]
-        struct ListRequest<'a> {
+        struct Req<'a> {
             prefix: &'a str,
         }
 
-        let response = self
-            .client
-            .post(&url)
-            .header("apikey", &self.service_key)
-            .header("Authorization", format!("Bearer {}", self.service_key))
-            .json(&ListRequest {
+        let url = format!("{}/object/list/{}", self.base_url, self.bucket_name);
+        let resp = self
+            .auth(self.client.post(&url))
+            .json(&Req {
                 prefix: path.unwrap_or(""),
             })
             .send()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to list files: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("List failed: {e}")))?;
 
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            return Err(AppError::ExternalService(format!(
-                "Failed to list files: {error}"
-            )));
+        if !resp.status().is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(format!("List failed: {body}")));
         }
 
-        response
-            .json()
+        resp.json()
             .await
-            .map_err(|e| AppError::ExternalService(format!("Failed to parse file list: {e}")))
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))
     }
 }
 
-/// File information from storage listing.
+/// File metadata from a storage listing.
 #[derive(Debug, Clone, Deserialize)]
 pub struct FileInfo {
-    /// File name
     pub name: String,
-
-    /// File ID
     pub id: Option<String>,
-
-    /// Last updated timestamp
     pub updated_at: Option<String>,
-
-    /// Creation timestamp
     pub created_at: Option<String>,
-
-    /// File size in bytes
     #[serde(default)]
     pub metadata: FileMetadata,
 }
 
-/// File metadata.
+/// Size and MIME type from a listing entry.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct FileMetadata {
-    /// File size in bytes
     pub size: Option<u64>,
-
-    /// MIME type
     pub mimetype: Option<String>,
 }

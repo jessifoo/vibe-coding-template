@@ -1,106 +1,102 @@
 //! Backend library crate.
 //!
-//! Exposes modules for testing and reuse. Provides the application
-//! builder so integration tests can construct the full router.
+//! Exposes all modules for integration testing and binary reuse.
+//! The [`create_app`] function is the main entry point for assembling the Axum router.
+
+// Allow unwrap/expect in test code — standard Rust test practice.
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, clippy::manual_string_new)
+)]
 
 pub mod api;
 pub mod config;
 pub mod models;
 pub mod services;
+pub mod utils;
 
 use axum::{
-    http::{header, Method, StatusCode},
+    Json, Router,
+    http::{Method, StatusCode, header},
     response::IntoResponse,
     routing::get,
-    Json, Router,
 };
 use serde_json::json;
 use tower_http::{
-    cors::{Any, CorsLayer},
+    cors::{AllowOrigin, Any, CorsLayer},
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     trace::TraceLayer,
 };
 
 use crate::config::SETTINGS;
 
-/// Create the application router with all middleware.
+/// Build the fully-configured application [`Router`].
 ///
-/// This is the main entry point for building the Axum application.
-/// It wires up health checks, API routes, CORS, tracing, and request IDs.
-///
-/// # Returns
-///
-/// A fully configured `Router` ready to serve requests.
+/// Wires up the health-check endpoint, all API sub-routes,
+/// CORS, request tracing, and request-ID propagation.
 pub fn create_app() -> Router {
-    // Build CORS layer
     let cors = build_cors_layer();
-
-    // Create API router
     let api_routes = api::create_router();
 
-    // Build main router
     Router::new()
-        // Health check at root
         .route("/", get(health_check))
-        // API routes under /api prefix
         .nest("/api", api_routes)
-        // Add middleware layers (order matters - applied bottom to top)
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
 }
 
-/// Build CORS layer from configuration.
-fn build_cors_layer() -> CorsLayer {
-    let origins: Vec<_> = SETTINGS
-        .cors
-        .origins
-        .iter()
-        .filter_map(|origin| origin.parse().ok())
-        .collect();
-
-    let cors = if origins.is_empty() {
-        // Fallback to any origin in development
-        if SETTINGS.environment == config::Environment::Development {
-            tracing::warn!("No CORS origins configured, allowing any origin (development mode)");
-            CorsLayer::new().allow_origin(Any)
-        } else {
-            tracing::warn!("No CORS origins configured in production mode");
-            CorsLayer::new()
-        }
-    } else {
-        CorsLayer::new().allow_origin(origins)
-    };
-
-    cors.allow_methods([
-        Method::GET,
-        Method::POST,
-        Method::PUT,
-        Method::DELETE,
-        Method::OPTIONS,
-        Method::PATCH,
-    ])
-    .allow_headers([
-        header::CONTENT_TYPE,
-        header::AUTHORIZATION,
-        header::ACCEPT,
-        header::ORIGIN,
-    ])
-    .allow_credentials(true)
-    .max_age(std::time::Duration::from_secs(600))
-}
-
-/// Health check endpoint.
+/// Health-check endpoint (`GET /`).
 ///
-/// Returns a JSON response with server status, environment, and version.
+/// Returns server status, environment, and crate version.
 async fn health_check() -> impl IntoResponse {
     (
         StatusCode::OK,
         Json(json!({
             "status": "online",
             "environment": SETTINGS.environment.to_string(),
-            "version": env!("CARGO_PKG_VERSION")
+            "version": env!("CARGO_PKG_VERSION"),
         })),
     )
+}
+
+/// Construct the CORS middleware from [`SETTINGS`].
+fn build_cors_layer() -> CorsLayer {
+    let parsed_origins: Vec<_> = SETTINGS
+        .cors
+        .origins
+        .iter()
+        .filter_map(|o| o.parse().ok())
+        .collect();
+
+    let origin_layer = if parsed_origins.is_empty() {
+        if SETTINGS.environment == config::Environment::Development {
+            tracing::warn!("No CORS origins configured — allowing any origin (development mode)");
+            CorsLayer::new().allow_origin(Any)
+        } else {
+            tracing::warn!("No CORS origins configured in production mode");
+            CorsLayer::new()
+        }
+    } else {
+        CorsLayer::new().allow_origin(AllowOrigin::list(parsed_origins))
+    };
+
+    origin_layer
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+            Method::PATCH,
+        ])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            header::ORIGIN,
+        ])
+        .allow_credentials(true)
+        .max_age(std::time::Duration::from_secs(600))
 }
