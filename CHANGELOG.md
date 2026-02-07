@@ -12,10 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AGENTS.md` file with consolidated AI agent instructions
 - Context-aware development guidance that automatically applies based on file patterns
 - Production-ready code templates for common patterns:
-  - FastAPI endpoint template (`@api-endpoint-template`)
+  - Axum endpoint template (`@api-endpoint-template`)
   - React component template (`@react-component-template`)
   - Service class template (`@service-class-template`)
-- Backend-specific rules for FastAPI, Supabase integration, and LLM services
+- Backend-specific rules for Rust Axum, Supabase integration, and LLM services
 - Frontend-specific rules for Next.js, authentication, and API integration
 - Database migration patterns and best practices
 - Development workflow automation and troubleshooting guides
@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - Initial Release
 
 ### Added
-- Full-stack application template with Next.js frontend and FastAPI backend
+- Full-stack application template with Next.js frontend and Rust Axum backend
 - Supabase integration for authentication, database, and storage
 - LLM integration with OpenAI and Anthropic support
 - Vector database integration with Qdrant
@@ -43,13 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database migration system with Supabase CLI
 - Authentication flows with OAuth providers (Google, LinkedIn)
 - Comprehensive service layer architecture
-- Type-safe API development with Pydantic models
+- Type-safe API development with serde models
 - Responsive frontend with Tailwind CSS
 - Development automation with Makefile commands
 - First-time setup script for easy onboarding
 
 ### Features
-- **Backend**: FastAPI with async/await patterns, service layer architecture
+- **Backend**: Rust Axum with async/await patterns, service layer architecture
 - **Frontend**: Next.js with TypeScript, Tailwind CSS, and authentication
 - **Database**: Supabase PostgreSQL with Row Level Security (RLS)
 - **Authentication**: Multi-provider OAuth with Supabase Auth

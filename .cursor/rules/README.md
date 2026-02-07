@@ -18,7 +18,7 @@ The most important file for AI assistants is **`ai-guidelines.mdc`** which conta
 - **`development-workflow.mdc`**: Development workflow, commands, and troubleshooting
 
 ### Backend Rules (`backend/`)
-- **`fastapi-standards.mdc`**: Rust Axum endpoint patterns and best practices
+- **`axum-standards.mdc`**: Rust Axum endpoint patterns and best practices
 - **`supabase-integration.mdc`**: Supabase service usage and patterns
 - **`llm-integration.mdc`**: LLM and embedding service integration
 
@@ -31,7 +31,7 @@ The most important file for AI assistants is **`ai-guidelines.mdc`** which conta
 - **`database-migrations.mdc`**: Migration patterns and SQL best practices
 
 ### Templates (`templates/`)
-- **`api-endpoint-template.mdc`**: Complete FastAPI endpoint template
+- **`api-endpoint-template.mdc`**: Complete Axum endpoint template
 - **`react-component-template.mdc`**: Complete React component template
 - **`service-class-template.mdc`**: Service class pattern template
 
@@ -47,13 +47,13 @@ Rules are automatically applied based on:
 
 ### Automatic Application
 Rules automatically provide context when you're working with relevant files:
-- Editing Python files in `backend/` → Backend rules apply
+- Editing Rust files in `backend/` → Backend rules apply
 - Editing React components → Frontend rules apply
 - Working with migrations → Database rules apply
 
 ### Manual Reference
 Reference templates explicitly:
-- `@api-endpoint-template` - Get the FastAPI endpoint template
+- `@api-endpoint-template` - Get the Axum endpoint template
 - `@react-component-template` - Get the React component template
 - `@service-class-template` - Get the service class template
 

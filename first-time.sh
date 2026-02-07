@@ -103,13 +103,13 @@ else
   print_message "Node.js is installed (${node_version})."
 fi
 
-# Check for Python
-if ! command -v python3 &> /dev/null; then
-  print_warning "Python 3 not found. Backend development might be limited."
-  print_message "Please install Python 3 from https://www.python.org/downloads/"
+# Check for Rust
+if ! command -v rustc &> /dev/null; then
+  print_warning "Rust not found. Backend development might be limited."
+  print_message "Please install Rust from https://rustup.rs/"
 else
-  python_version=$(python3 --version)
-  print_message "Python is installed (${python_version})."
+  rust_version=$(rustc --version)
+  print_message "Rust is installed (${rust_version})."
 fi
 
 # Set up Supabase

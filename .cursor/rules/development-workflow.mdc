@@ -11,7 +11,7 @@ alwaysApply: false
 When setting up the project for the first time:
 
 1. **Run Setup Script**: `./first-time.sh`
-   - Checks for required tools (Docker, Make, Node.js, Python)
+   - Checks for required tools (Docker, Make, Node.js, Rust)
    - Guides through API key configuration
    - Generates .env files
 
@@ -71,8 +71,8 @@ make db-status
 ### Testing Changes
 
 #### API Testing
-- Visit http://localhost:8000/docs for interactive API documentation
-- Use the built-in FastAPI test interface
+- Visit http://localhost:8000/ for health check
+- Use `curl` or tools like Postman to test endpoints
 - Test authentication endpoints with proper tokens
 
 #### Frontend Testing
@@ -83,7 +83,7 @@ make db-status
 ### Code Quality
 
 #### Backend Code Quality (Rust)
-- Follow Axum standards from `.cursor/rules/backend/fastapi-standards.mdc`
+- Follow Axum standards from `.cursor/rules/backend/axum-standards.mdc`
 - Run `cargo clippy` - no warnings allowed
 - Run `cargo fmt` before committing
 - Use `Result<T, AppError>` for all fallible operations

@@ -10,14 +10,14 @@ export default function Home() {
         </h1>
 
         <p className="mt-3 text-base text-gray-500 sm:mt-5 sm:text-lg max-w-xl mx-auto">
-          A complete starter template featuring NextJS, FastAPI, Supabase, and LLM integrations.
+          A complete starter template featuring Next.js, Rust Axum, Supabase, and LLM integrations.
         </p>
 
         <div className="mt-8 sm:mt-12">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
             <FeatureCard
-              title="FastAPI Backend"
-              description="High-performance API with Python FastAPI"
+              title="Rust Axum Backend"
+              description="Type-safe, high-performance API with Rust Axum"
               icon="🚀"
             />
             <FeatureCard
