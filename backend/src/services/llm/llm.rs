@@ -1,6 +1,5 @@
 //! Text-generation service (`OpenAI` & Anthropic).
 
-use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -8,20 +7,59 @@ use crate::config::SETTINGS;
 use crate::models::{AppError, LlmProvider, LlmUsage, TextGenerationResponse};
 
 // ---------------------------------------------------------------------------
-// Trait
+// Public enum — avoids Box<dyn> and async-trait crate entirely
 // ---------------------------------------------------------------------------
 
-/// Unified interface for text-generation backends.
-#[async_trait]
-pub trait LlmService: Send + Sync {
+/// A text-generation backend (enum dispatch, no dynamic dispatch needed).
+pub enum LlmService {
+    OpenAi(OpenAiService),
+    Anthropic(AnthropicService),
+}
+
+impl LlmService {
     /// Generate text from a prompt.
-    async fn generate_text(
+    pub async fn generate_text(
         &self,
         prompt: &str,
         model: &str,
         max_tokens: u32,
         temperature: f32,
-    ) -> Result<TextGenerationResponse, AppError>;
+    ) -> Result<TextGenerationResponse, AppError> {
+        match self {
+            Self::OpenAi(s) => {
+                s.generate_text(prompt, model, max_tokens, temperature)
+                    .await
+            }
+            Self::Anthropic(s) => {
+                s.generate_text(prompt, model, max_tokens, temperature)
+                    .await
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+/// Creates the appropriate [`LlmService`] for a given provider.
+pub struct LlmServiceFactory;
+
+impl LlmServiceFactory {
+    /// Build a service for `provider`, or return a config error.
+    pub fn create(provider: LlmProvider) -> Result<LlmService, AppError> {
+        match provider {
+            LlmProvider::OpenAI => {
+                let key = require_api_key(SETTINGS.llm.openai_api_key.as_ref(), "OPENAI_API_KEY")?;
+                Ok(LlmService::OpenAi(OpenAiService::new(key)?))
+            }
+            LlmProvider::Anthropic => {
+                let key =
+                    require_api_key(SETTINGS.llm.anthropic_api_key.as_ref(), "ANTHROPIC_API_KEY")?;
+                Ok(LlmService::Anthropic(AnthropicService::new(key)?))
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -40,10 +78,7 @@ impl OpenAiService {
             .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
         Ok(Self { client, api_key })
     }
-}
 
-#[async_trait]
-impl LlmService for OpenAiService {
     async fn generate_text(
         &self,
         prompt: &str,
@@ -145,10 +180,7 @@ impl AnthropicService {
             .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
         Ok(Self { client, api_key })
     }
-}
 
-#[async_trait]
-impl LlmService for AnthropicService {
     async fn generate_text(
         &self,
         prompt: &str,
@@ -232,30 +264,9 @@ impl LlmService for AnthropicService {
 }
 
 // ---------------------------------------------------------------------------
-// Factory
+// Helpers
 // ---------------------------------------------------------------------------
 
-/// Creates the appropriate [`LlmService`] for a given provider.
-pub struct LlmServiceFactory;
-
-impl LlmServiceFactory {
-    /// Build a boxed service for `provider`, or return a config error.
-    pub fn create(provider: LlmProvider) -> Result<Box<dyn LlmService>, AppError> {
-        match provider {
-            LlmProvider::OpenAI => {
-                let key = require_api_key(SETTINGS.llm.openai_api_key.as_ref(), "OPENAI_API_KEY")?;
-                Ok(Box::new(OpenAiService::new(key)?))
-            }
-            LlmProvider::Anthropic => {
-                let key =
-                    require_api_key(SETTINGS.llm.anthropic_api_key.as_ref(), "ANTHROPIC_API_KEY")?;
-                Ok(Box::new(AnthropicService::new(key)?))
-            }
-        }
-    }
-}
-
-/// Extract a non-empty API key or return a configuration error.
 fn require_api_key(slot: Option<&String>, var_name: &str) -> Result<String, AppError> {
     slot.filter(|k| !k.is_empty())
         .cloned()

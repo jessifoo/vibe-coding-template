@@ -1,6 +1,5 @@
 //! Embedding service (`OpenAI`; Anthropic placeholder).
 
-use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -8,18 +7,52 @@ use crate::config::SETTINGS;
 use crate::models::{AppError, EmbeddingResponse, LlmProvider, LlmUsage};
 
 // ---------------------------------------------------------------------------
-// Trait
+// Public enum — avoids Box<dyn> and async-trait crate entirely
 // ---------------------------------------------------------------------------
 
-/// Unified interface for embedding backends.
-#[async_trait]
-pub trait EmbeddingService: Send + Sync {
+/// An embedding backend (enum dispatch).
+pub enum EmbeddingService {
+    OpenAi(OpenAiEmbeddingService),
+    Anthropic,
+}
+
+impl EmbeddingService {
     /// Create an embedding vector for the given text.
-    async fn create_embedding(
+    pub async fn create_embedding(
         &self,
         text: &str,
         model: &str,
-    ) -> Result<EmbeddingResponse, AppError>;
+    ) -> Result<EmbeddingResponse, AppError> {
+        match self {
+            Self::OpenAi(s) => s.create_embedding(text, model).await,
+            Self::Anthropic => Err(AppError::Configuration(
+                "Anthropic does not offer an embeddings API. Use provider 'openai'.".into(),
+            )),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+/// Creates the appropriate [`EmbeddingService`] for a given provider.
+pub struct EmbeddingServiceFactory;
+
+impl EmbeddingServiceFactory {
+    /// Build a service for `provider`, or return a config error.
+    pub fn create(provider: LlmProvider) -> Result<EmbeddingService, AppError> {
+        match provider {
+            LlmProvider::OpenAI => {
+                let key = require_api_key(SETTINGS.llm.openai_api_key.as_ref(), "OPENAI_API_KEY")?;
+                Ok(EmbeddingService::OpenAi(OpenAiEmbeddingService::new(key)?))
+            }
+            LlmProvider::Anthropic => {
+                require_api_key(SETTINGS.llm.anthropic_api_key.as_ref(), "ANTHROPIC_API_KEY")?;
+                Ok(EmbeddingService::Anthropic)
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -38,10 +71,7 @@ impl OpenAiEmbeddingService {
             .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
         Ok(Self { client, api_key })
     }
-}
 
-#[async_trait]
-impl EmbeddingService for OpenAiEmbeddingService {
     async fn create_embedding(
         &self,
         text: &str,
@@ -106,46 +136,8 @@ impl EmbeddingService for OpenAiEmbeddingService {
 }
 
 // ---------------------------------------------------------------------------
-// Anthropic (stub — no dedicated embedding API)
+// Helpers
 // ---------------------------------------------------------------------------
-
-pub struct AnthropicEmbeddingService;
-
-#[async_trait]
-impl EmbeddingService for AnthropicEmbeddingService {
-    async fn create_embedding(
-        &self,
-        _text: &str,
-        _model: &str,
-    ) -> Result<EmbeddingResponse, AppError> {
-        Err(AppError::Configuration(
-            "Anthropic does not offer an embeddings API. Use provider 'openai'.".into(),
-        ))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
-
-/// Creates the appropriate [`EmbeddingService`] for a given provider.
-pub struct EmbeddingServiceFactory;
-
-impl EmbeddingServiceFactory {
-    /// Build a boxed service for `provider`, or return a config error.
-    pub fn create(provider: LlmProvider) -> Result<Box<dyn EmbeddingService>, AppError> {
-        match provider {
-            LlmProvider::OpenAI => {
-                let key = require_api_key(SETTINGS.llm.openai_api_key.as_ref(), "OPENAI_API_KEY")?;
-                Ok(Box::new(OpenAiEmbeddingService::new(key)?))
-            }
-            LlmProvider::Anthropic => {
-                require_api_key(SETTINGS.llm.anthropic_api_key.as_ref(), "ANTHROPIC_API_KEY")?;
-                Ok(Box::new(AnthropicEmbeddingService))
-            }
-        }
-    }
-}
 
 fn require_api_key(slot: Option<&String>, var_name: &str) -> Result<String, AppError> {
     slot.filter(|k| !k.is_empty())
