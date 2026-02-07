@@ -150,6 +150,7 @@ pub struct EmbeddingResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use validator::Validate;
 
     #[test]
     fn test_llm_usage_completion() {
@@ -157,6 +158,14 @@ mod tests {
         assert_eq!(usage.prompt_tokens, 100);
         assert_eq!(usage.completion_tokens, Some(50));
         assert_eq!(usage.total_tokens, 150);
+    }
+
+    #[test]
+    fn test_llm_usage_completion_zero() {
+        let usage = LlmUsage::completion(0, 0);
+        assert_eq!(usage.prompt_tokens, 0);
+        assert_eq!(usage.completion_tokens, Some(0));
+        assert_eq!(usage.total_tokens, 0);
     }
 
     #[test]
@@ -168,8 +177,185 @@ mod tests {
     }
 
     #[test]
+    fn test_llm_usage_serialization_completion() {
+        let usage = LlmUsage::completion(10, 20);
+        let json = serde_json::to_string(&usage).unwrap();
+        assert!(json.contains("\"prompt_tokens\":10"));
+        assert!(json.contains("\"completion_tokens\":20"));
+        assert!(json.contains("\"total_tokens\":30"));
+    }
+
+    #[test]
+    fn test_llm_usage_serialization_embedding_omits_completion() {
+        let usage = LlmUsage::embedding(50);
+        let json = serde_json::to_string(&usage).unwrap();
+        assert!(json.contains("\"prompt_tokens\":50"));
+        assert!(!json.contains("completion_tokens"));
+    }
+
+    #[test]
     fn test_provider_display() {
         assert_eq!(LlmProvider::OpenAI.to_string(), "openai");
         assert_eq!(LlmProvider::Anthropic.to_string(), "anthropic");
+    }
+
+    #[test]
+    fn test_provider_default() {
+        let provider = LlmProvider::default();
+        assert_eq!(provider, LlmProvider::OpenAI);
+    }
+
+    #[test]
+    fn test_provider_serialization() {
+        let json = serde_json::to_string(&LlmProvider::OpenAI).unwrap();
+        assert_eq!(json, "\"openai\"");
+
+        let json = serde_json::to_string(&LlmProvider::Anthropic).unwrap();
+        assert_eq!(json, "\"anthropic\"");
+    }
+
+    #[test]
+    fn test_provider_deserialization() {
+        let provider: LlmProvider = serde_json::from_str("\"openai\"").unwrap();
+        assert_eq!(provider, LlmProvider::OpenAI);
+
+        let provider: LlmProvider = serde_json::from_str("\"anthropic\"").unwrap();
+        assert_eq!(provider, LlmProvider::Anthropic);
+    }
+
+    #[test]
+    fn test_text_generation_request_defaults() {
+        let json = r#"{"prompt":"hello"}"#;
+        let req: TextGenerationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.prompt, "hello");
+        assert_eq!(req.model, "gpt-3.5-turbo");
+        assert_eq!(req.max_tokens, 500);
+        assert!((req.temperature - 0.7).abs() < f32::EPSILON);
+        assert_eq!(req.provider, LlmProvider::OpenAI);
+    }
+
+    #[test]
+    fn test_text_generation_request_custom_values() {
+        let json = r#"{"prompt":"test","model":"gpt-4","max_tokens":1000,"temperature":0.5,"provider":"anthropic"}"#;
+        let req: TextGenerationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.prompt, "test");
+        assert_eq!(req.model, "gpt-4");
+        assert_eq!(req.max_tokens, 1000);
+        assert!((req.temperature - 0.5).abs() < f32::EPSILON);
+        assert_eq!(req.provider, LlmProvider::Anthropic);
+    }
+
+    #[test]
+    fn test_text_generation_request_validation_empty_prompt() {
+        let req = TextGenerationRequest {
+            prompt: String::new(),
+            model: "gpt-3.5-turbo".to_string(),
+            max_tokens: 500,
+            temperature: 0.7,
+            provider: LlmProvider::OpenAI,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_text_generation_request_validation_max_tokens_too_high() {
+        let req = TextGenerationRequest {
+            prompt: "hello".to_string(),
+            model: "gpt-3.5-turbo".to_string(),
+            max_tokens: 5000,
+            temperature: 0.7,
+            provider: LlmProvider::OpenAI,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_text_generation_request_validation_temperature_out_of_range() {
+        let req = TextGenerationRequest {
+            prompt: "hello".to_string(),
+            model: "gpt-3.5-turbo".to_string(),
+            max_tokens: 500,
+            temperature: 3.0,
+            provider: LlmProvider::OpenAI,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_text_generation_request_validation_valid() {
+        let req = TextGenerationRequest {
+            prompt: "hello".to_string(),
+            model: "gpt-3.5-turbo".to_string(),
+            max_tokens: 500,
+            temperature: 0.7,
+            provider: LlmProvider::OpenAI,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_embedding_request_defaults() {
+        let json = r#"{"text":"hello world"}"#;
+        let req: EmbeddingRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.text, "hello world");
+        assert_eq!(req.model, "text-embedding-ada-002");
+        assert_eq!(req.provider, LlmProvider::OpenAI);
+    }
+
+    #[test]
+    fn test_embedding_request_validation_empty_text() {
+        let req = EmbeddingRequest {
+            text: String::new(),
+            model: "text-embedding-ada-002".to_string(),
+            provider: LlmProvider::OpenAI,
+        };
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn test_embedding_request_validation_valid() {
+        let req = EmbeddingRequest {
+            text: "hello".to_string(),
+            model: "text-embedding-ada-002".to_string(),
+            provider: LlmProvider::OpenAI,
+        };
+        assert!(req.validate().is_ok());
+    }
+
+    #[test]
+    fn test_text_generation_response_serialization() {
+        let resp = TextGenerationResponse {
+            text: "Generated text".to_string(),
+            model: "gpt-4".to_string(),
+            usage: LlmUsage::completion(10, 20),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"text\":\"Generated text\""));
+        assert!(json.contains("\"model\":\"gpt-4\""));
+    }
+
+    #[test]
+    fn test_embedding_response_serialization() {
+        let resp = EmbeddingResponse {
+            embedding: vec![0.1, 0.2, 0.3],
+            model: "text-embedding-ada-002".to_string(),
+            usage: LlmUsage::embedding(5),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"model\":\"text-embedding-ada-002\""));
+        assert!(json.contains("\"embedding\""));
+    }
+
+    #[test]
+    fn test_provider_equality() {
+        assert_eq!(LlmProvider::OpenAI, LlmProvider::OpenAI);
+        assert_ne!(LlmProvider::OpenAI, LlmProvider::Anthropic);
+    }
+
+    #[test]
+    fn test_provider_copy() {
+        let p1 = LlmProvider::OpenAI;
+        let p2 = p1;
+        assert_eq!(p1, p2);
     }
 }

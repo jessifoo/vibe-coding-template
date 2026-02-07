@@ -151,3 +151,62 @@ fn truncate(s: &str, max_len: usize) -> String {
         format!("{}...", &s[..max_len])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_bearer_token_valid() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer test123".parse().unwrap());
+        let token = extract_bearer_token(&headers).unwrap();
+        assert_eq!(token, "test123");
+    }
+
+    #[test]
+    fn test_extract_bearer_token_lowercase() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "bearer test123".parse().unwrap());
+        let token = extract_bearer_token(&headers).unwrap();
+        assert_eq!(token, "test123");
+    }
+
+    #[test]
+    fn test_extract_bearer_token_missing() {
+        let headers = HeaderMap::new();
+        assert!(extract_bearer_token(&headers).is_err());
+    }
+
+    #[test]
+    fn test_extract_bearer_token_wrong_scheme() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Basic abc".parse().unwrap());
+        assert!(extract_bearer_token(&headers).is_err());
+    }
+
+    #[test]
+    fn test_truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_exact_length() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_long_string() {
+        assert_eq!(truncate("hello world", 5), "hello...");
+    }
+
+    #[test]
+    fn test_truncate_empty_string() {
+        assert_eq!(truncate("", 5), "");
+    }
+
+    #[test]
+    fn test_truncate_zero_length() {
+        assert_eq!(truncate("hello", 0), "...");
+    }
+}

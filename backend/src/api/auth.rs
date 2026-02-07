@@ -70,3 +70,63 @@ fn extract_bearer_token(headers: &HeaderMap) -> Result<String, AppError> {
             )
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_bearer_token_valid() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer my_token".parse().unwrap());
+        let token = extract_bearer_token(&headers).unwrap();
+        assert_eq!(token, "my_token");
+    }
+
+    #[test]
+    fn test_extract_bearer_token_lowercase() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "bearer my_token".parse().unwrap());
+        let token = extract_bearer_token(&headers).unwrap();
+        assert_eq!(token, "my_token");
+    }
+
+    #[test]
+    fn test_extract_bearer_token_missing_header() {
+        let headers = HeaderMap::new();
+        let result = extract_bearer_token(&headers);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AppError::Unauthorized(msg) => assert!(msg.contains("Missing")),
+            other => panic!("Expected Unauthorized, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_extract_bearer_token_wrong_scheme() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Basic abc123".parse().unwrap());
+        let result = extract_bearer_token(&headers);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            AppError::Unauthorized(msg) => assert!(msg.contains("Invalid")),
+            other => panic!("Expected Unauthorized, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_extract_bearer_token_no_prefix() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "just_a_token".parse().unwrap());
+        let result = extract_bearer_token(&headers);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_extract_bearer_token_empty_token() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer ".parse().unwrap());
+        let token = extract_bearer_token(&headers).unwrap();
+        assert_eq!(token, "");
+    }
+}

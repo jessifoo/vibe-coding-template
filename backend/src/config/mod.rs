@@ -121,9 +121,7 @@ impl LlmConfig {
     /// Check if OpenAI is configured.
     #[must_use]
     pub fn has_openai(&self) -> bool {
-        self.openai_api_key
-            .as_ref()
-            .map_or(false, |k| !k.is_empty())
+        self.openai_api_key.as_ref().is_some_and(|k| !k.is_empty())
     }
 
     /// Check if Anthropic is configured.
@@ -131,7 +129,7 @@ impl LlmConfig {
     pub fn has_anthropic(&self) -> bool {
         self.anthropic_api_key
             .as_ref()
-            .map_or(false, |k| !k.is_empty())
+            .is_some_and(|k| !k.is_empty())
     }
 }
 
@@ -258,14 +256,170 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_environment_parsing() {
+    fn test_environment_parsing_full_names() {
         assert_eq!(
             "development".parse::<Environment>().unwrap(),
             Environment::Development
         );
         assert_eq!(
+            "staging".parse::<Environment>().unwrap(),
+            Environment::Staging
+        );
+        assert_eq!(
             "production".parse::<Environment>().unwrap(),
             Environment::Production
         );
+    }
+
+    #[test]
+    fn test_environment_parsing_short_names() {
+        assert_eq!(
+            "dev".parse::<Environment>().unwrap(),
+            Environment::Development
+        );
+        assert_eq!(
+            "stage".parse::<Environment>().unwrap(),
+            Environment::Staging
+        );
+        assert_eq!(
+            "prod".parse::<Environment>().unwrap(),
+            Environment::Production
+        );
+    }
+
+    #[test]
+    fn test_environment_parsing_case_insensitive() {
+        assert_eq!(
+            "DEVELOPMENT".parse::<Environment>().unwrap(),
+            Environment::Development
+        );
+        assert_eq!(
+            "Production".parse::<Environment>().unwrap(),
+            Environment::Production
+        );
+        assert_eq!(
+            "DEV".parse::<Environment>().unwrap(),
+            Environment::Development
+        );
+    }
+
+    #[test]
+    fn test_environment_parsing_invalid() {
+        assert!("invalid".parse::<Environment>().is_err());
+        assert!("".parse::<Environment>().is_err());
+        assert!("test".parse::<Environment>().is_err());
+    }
+
+    #[test]
+    fn test_environment_display() {
+        assert_eq!(Environment::Development.to_string(), "development");
+        assert_eq!(Environment::Staging.to_string(), "staging");
+        assert_eq!(Environment::Production.to_string(), "production");
+    }
+
+    #[test]
+    fn test_environment_default() {
+        assert_eq!(Environment::default(), Environment::Development);
+    }
+
+    #[test]
+    fn test_server_config_default() {
+        let config = ServerConfig::default();
+        assert_eq!(config.host, "0.0.0.0");
+        assert_eq!(config.port, 8000);
+    }
+
+    #[test]
+    fn test_cors_config_default() {
+        let config = CorsConfig::default();
+        assert_eq!(config.origins, vec!["http://localhost:3000".to_string()]);
+    }
+
+    #[test]
+    fn test_qdrant_config_default() {
+        let config = QdrantConfig::default();
+        assert!(config.url.is_none());
+        assert!(config.api_key.is_none());
+        assert_eq!(config.collection_name, "default_collection");
+    }
+
+    #[test]
+    fn test_llm_config_default() {
+        let config = LlmConfig::default();
+        assert!(config.openai_api_key.is_none());
+        assert!(config.anthropic_api_key.is_none());
+    }
+
+    #[test]
+    fn test_llm_config_has_openai_none() {
+        let config = LlmConfig {
+            openai_api_key: None,
+            anthropic_api_key: None,
+        };
+        assert!(!config.has_openai());
+    }
+
+    #[test]
+    fn test_llm_config_has_openai_empty() {
+        let config = LlmConfig {
+            openai_api_key: Some(String::new()),
+            anthropic_api_key: None,
+        };
+        assert!(!config.has_openai());
+    }
+
+    #[test]
+    fn test_llm_config_has_openai_set() {
+        let config = LlmConfig {
+            openai_api_key: Some("sk-test".to_string()),
+            anthropic_api_key: None,
+        };
+        assert!(config.has_openai());
+    }
+
+    #[test]
+    fn test_llm_config_has_anthropic_none() {
+        let config = LlmConfig {
+            openai_api_key: None,
+            anthropic_api_key: None,
+        };
+        assert!(!config.has_anthropic());
+    }
+
+    #[test]
+    fn test_llm_config_has_anthropic_empty() {
+        let config = LlmConfig {
+            openai_api_key: None,
+            anthropic_api_key: Some(String::new()),
+        };
+        assert!(!config.has_anthropic());
+    }
+
+    #[test]
+    fn test_llm_config_has_anthropic_set() {
+        let config = LlmConfig {
+            openai_api_key: None,
+            anthropic_api_key: Some("sk-ant-test".to_string()),
+        };
+        assert!(config.has_anthropic());
+    }
+
+    #[test]
+    fn test_settings_error_display() {
+        let err = SettingsError::MissingEnvVar("TEST_KEY".to_string());
+        assert_eq!(
+            err.to_string(),
+            "Missing required environment variable: TEST_KEY"
+        );
+
+        let err = SettingsError::InvalidValue("bad port".to_string());
+        assert_eq!(err.to_string(), "Invalid configuration value: bad port");
+    }
+
+    #[test]
+    fn test_environment_equality() {
+        assert_eq!(Environment::Development, Environment::Development);
+        assert_ne!(Environment::Development, Environment::Production);
+        assert_ne!(Environment::Staging, Environment::Production);
     }
 }

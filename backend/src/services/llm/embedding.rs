@@ -80,6 +80,7 @@ impl EmbeddingService for OpenAiEmbeddingService {
         #[derive(Deserialize)]
         struct EmbeddingUsage {
             prompt_tokens: u32,
+            #[allow(dead_code)]
             total_tokens: u32,
         }
 

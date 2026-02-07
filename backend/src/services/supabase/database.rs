@@ -254,6 +254,12 @@ impl SupabaseDatabaseService {
 }
 
 impl Default for SupabaseDatabaseService {
+    /// Create a default database service.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the HTTP client cannot be created.
+    #[allow(clippy::expect_used)]
     fn default() -> Self {
         Self::new().expect("Failed to create default SupabaseDatabaseService")
     }

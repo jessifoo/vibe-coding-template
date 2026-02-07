@@ -126,3 +126,144 @@ impl From<validator::ValidationErrors> for AppError {
         Self::Validation(err.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_app_error_status_codes() {
+        assert_eq!(
+            AppError::Unauthorized("test".into()).status_code(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            AppError::Forbidden("test".into()).status_code(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            AppError::NotFound("test".into()).status_code(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            AppError::BadRequest("test".into()).status_code(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            AppError::Validation("test".into()).status_code(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            AppError::ExternalService("test".into()).status_code(),
+            StatusCode::BAD_GATEWAY
+        );
+        assert_eq!(
+            AppError::Configuration("test".into()).status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            AppError::Internal("test".into()).status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn test_app_error_display() {
+        let err = AppError::Unauthorized("invalid token".into());
+        assert_eq!(err.to_string(), "Authentication failed: invalid token");
+
+        let err = AppError::NotFound("user 123".into());
+        assert_eq!(err.to_string(), "Resource not found: user 123");
+
+        let err = AppError::BadRequest("missing field".into());
+        assert_eq!(err.to_string(), "Invalid request: missing field");
+
+        let err = AppError::ExternalService("timeout".into());
+        assert_eq!(err.to_string(), "External service error: timeout");
+
+        let err = AppError::Configuration("missing key".into());
+        assert_eq!(err.to_string(), "Configuration error: missing key");
+
+        let err = AppError::Internal("unexpected".into());
+        assert_eq!(err.to_string(), "Internal server error: unexpected");
+
+        let err = AppError::Forbidden("access denied".into());
+        assert_eq!(err.to_string(), "Access denied: access denied");
+
+        let err = AppError::Validation("email invalid".into());
+        assert_eq!(err.to_string(), "Validation error: email invalid");
+    }
+
+    #[test]
+    fn test_api_error_response_new() {
+        let resp = ApiErrorResponse::new(StatusCode::BAD_REQUEST, "test error");
+        assert_eq!(resp.error, "test error");
+        assert_eq!(resp.status_code, StatusCode::BAD_REQUEST);
+        assert!(resp.details.is_none());
+    }
+
+    #[test]
+    fn test_api_error_response_with_details() {
+        let resp =
+            ApiErrorResponse::new(StatusCode::BAD_REQUEST, "test error").with_details("more info");
+        assert_eq!(resp.error, "test error");
+        assert_eq!(resp.details, Some("more info".to_string()));
+    }
+
+    #[test]
+    fn test_api_error_response_serialization() {
+        let resp = ApiErrorResponse::new(StatusCode::BAD_REQUEST, "test error");
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"error\":\"test error\""));
+        // status_code is skip, should not appear
+        assert!(!json.contains("status_code"));
+    }
+
+    #[test]
+    fn test_api_error_response_details_omitted_when_none() {
+        let resp = ApiErrorResponse::new(StatusCode::BAD_REQUEST, "test");
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(!json.contains("details"));
+    }
+
+    #[test]
+    fn test_api_error_response_details_included_when_some() {
+        let resp =
+            ApiErrorResponse::new(StatusCode::BAD_REQUEST, "test").with_details("extra info");
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"details\":\"extra info\""));
+    }
+
+    #[test]
+    fn test_from_serde_json_error() {
+        let err: serde_json::Error = serde_json::from_str::<String>("not valid json").unwrap_err();
+        let app_err = AppError::from(err);
+        match app_err {
+            AppError::BadRequest(msg) => assert!(msg.contains("JSON error")),
+            other => panic!("Expected BadRequest, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_from_validator_errors() {
+        use validator::Validate;
+
+        #[derive(validator::Validate)]
+        struct TestStruct {
+            #[validate(length(min = 5))]
+            name: String,
+        }
+
+        let item = TestStruct {
+            name: "ab".to_string(),
+        };
+        let validation_result = item.validate();
+        assert!(validation_result.is_err());
+
+        let app_err = AppError::from(validation_result.unwrap_err());
+        match app_err {
+            AppError::Validation(msg) => assert!(!msg.is_empty()),
+            other => panic!("Expected Validation, got: {other:?}"),
+        }
+    }
+}

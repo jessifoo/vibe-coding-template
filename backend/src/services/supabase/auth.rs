@@ -136,6 +136,12 @@ impl SupabaseAuthService {
 }
 
 impl Default for SupabaseAuthService {
+    /// Create a default auth service.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the HTTP client cannot be created.
+    #[allow(clippy::expect_used)]
     fn default() -> Self {
         Self::new().expect("Failed to create default SupabaseAuthService")
     }
