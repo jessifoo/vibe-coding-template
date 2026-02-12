@@ -9,6 +9,7 @@ license = "MIT"
 [dependencies]
 # Web framework
 axum = { version = "0.8", features = ["macros"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
 tower = { version = "0.5", features = ["timeout", "limit"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "request-id"] }
 
@@ -22,7 +23,7 @@ serde_json = "1"
 # Environment
 dotenvy = "0.15"
 
-# HTTP client (used for Supabase, OpenAI, Anthropic API calls)
+# HTTP client (Supabase, Anthropic — services without a Rust SDK)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
 # Validation
@@ -35,8 +36,20 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
+# JWT verification (local token introspection)
+jsonwebtoken = "9"
+
 # UUID generation
 uuid = { version = "1", features = ["v4", "serde"] }
+
+# Date / time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async trait support (conventional Rust pattern — SOLID / testable / mockable)
+async-trait = "0.1"
+
+# OpenAI SDK — typed requests, streaming, retries, all models
+async-openai = "0.27"
 
 # Vector database
 qdrant-client = "1"

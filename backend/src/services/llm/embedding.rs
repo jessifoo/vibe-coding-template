@@ -1,34 +1,103 @@
-//! Embedding service (`OpenAI`; Anthropic placeholder).
+//! Embedding service (`OpenAI` SDK; Anthropic placeholder).
+//!
+//! `OpenAI` calls go through the [`async_openai`] SDK for full type safety.
+//! Anthropic does not offer a dedicated embeddings API.
 
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use async_openai::{
+    Client as OpenAIClient, config::OpenAIConfig, types::CreateEmbeddingRequestArgs,
+};
+use async_trait::async_trait;
 
 use crate::config::SETTINGS;
 use crate::models::{AppError, EmbeddingResponse, LlmProvider, LlmUsage};
 
 // ---------------------------------------------------------------------------
-// Public enum — avoids Box<dyn> and async-trait crate entirely
+// Trait
 // ---------------------------------------------------------------------------
 
-/// An embedding backend (enum dispatch).
-pub enum EmbeddingService {
-    OpenAi(OpenAiEmbeddingService),
-    Anthropic,
+/// Unified interface for embedding backends.
+#[async_trait]
+pub trait EmbeddingService: Send + Sync {
+    /// Create an embedding vector for the given text.
+    async fn create_embedding(
+        &self,
+        text: &str,
+        model: &str,
+    ) -> Result<EmbeddingResponse, AppError>;
 }
 
-impl EmbeddingService {
-    /// Create an embedding vector for the given text.
-    pub async fn create_embedding(
+// ---------------------------------------------------------------------------
+// OpenAI  (via async-openai SDK)
+// ---------------------------------------------------------------------------
+
+/// `OpenAI` embedding service backed by the [`async_openai`] SDK.
+pub struct OpenAiEmbeddingService {
+    client: OpenAIClient<OpenAIConfig>,
+}
+
+impl OpenAiEmbeddingService {
+    fn new(api_key: &str) -> Self {
+        let config = OpenAIConfig::new().with_api_key(api_key);
+        Self {
+            client: OpenAIClient::with_config(config),
+        }
+    }
+}
+
+#[async_trait]
+impl EmbeddingService for OpenAiEmbeddingService {
+    async fn create_embedding(
         &self,
         text: &str,
         model: &str,
     ) -> Result<EmbeddingResponse, AppError> {
-        match self {
-            Self::OpenAi(s) => s.create_embedding(text, model).await,
-            Self::Anthropic => Err(AppError::Configuration(
-                "Anthropic does not offer an embeddings API. Use provider 'openai'.".into(),
-            )),
-        }
+        let request = CreateEmbeddingRequestArgs::default()
+            .model(model)
+            .input(text)
+            .build()
+            .map_err(|e| AppError::BadRequest(format!("Failed to build embedding request: {e}")))?;
+
+        let response = self
+            .client
+            .embeddings()
+            .create(request)
+            .await
+            .map_err(|e| AppError::ExternalService(format!("OpenAI embedding error: {e}")))?;
+
+        let embedding = response
+            .data
+            .into_iter()
+            .next()
+            .map(|d| d.embedding)
+            .ok_or_else(|| AppError::ExternalService("No embedding in response".into()))?;
+
+        let usage = LlmUsage::embedding(response.usage.prompt_tokens);
+
+        Ok(EmbeddingResponse {
+            embedding,
+            model: model.to_string(),
+            usage,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic  (stub — no dedicated embedding API)
+// ---------------------------------------------------------------------------
+
+/// Anthropic embedding stub — returns a clear error since the API does not exist.
+pub struct AnthropicEmbeddingService;
+
+#[async_trait]
+impl EmbeddingService for AnthropicEmbeddingService {
+    async fn create_embedding(
+        &self,
+        _text: &str,
+        _model: &str,
+    ) -> Result<EmbeddingResponse, AppError> {
+        Err(AppError::Configuration(
+            "Anthropic does not offer an embeddings API. Use provider 'openai'.".into(),
+        ))
     }
 }
 
@@ -40,98 +109,22 @@ impl EmbeddingService {
 pub struct EmbeddingServiceFactory;
 
 impl EmbeddingServiceFactory {
-    /// Build a service for `provider`, or return a config error.
-    pub fn create(provider: LlmProvider) -> Result<EmbeddingService, AppError> {
+    /// Build a boxed service for `provider`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Configuration`] if the provider's API key is missing.
+    pub fn create(provider: LlmProvider) -> Result<Box<dyn EmbeddingService>, AppError> {
         match provider {
             LlmProvider::OpenAI => {
                 let key = require_api_key(SETTINGS.llm.openai_api_key.as_ref(), "OPENAI_API_KEY")?;
-                Ok(EmbeddingService::OpenAi(OpenAiEmbeddingService::new(key)?))
+                Ok(Box::new(OpenAiEmbeddingService::new(&key)))
             }
             LlmProvider::Anthropic => {
                 require_api_key(SETTINGS.llm.anthropic_api_key.as_ref(), "ANTHROPIC_API_KEY")?;
-                Ok(EmbeddingService::Anthropic)
+                Ok(Box::new(AnthropicEmbeddingService))
             }
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// OpenAI
-// ---------------------------------------------------------------------------
-
-pub struct OpenAiEmbeddingService {
-    client: Client,
-    api_key: String,
-}
-
-impl OpenAiEmbeddingService {
-    fn new(api_key: String) -> Result<Self, AppError> {
-        let client = Client::builder()
-            .build()
-            .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
-        Ok(Self { client, api_key })
-    }
-
-    async fn create_embedding(
-        &self,
-        text: &str,
-        model: &str,
-    ) -> Result<EmbeddingResponse, AppError> {
-        #[derive(Serialize)]
-        struct Req<'a> {
-            model: &'a str,
-            input: &'a str,
-        }
-        #[derive(Deserialize)]
-        struct Resp {
-            data: Vec<Datum>,
-            usage: Usage,
-        }
-        #[derive(Deserialize)]
-        struct Datum {
-            embedding: Vec<f32>,
-        }
-        #[derive(Deserialize)]
-        struct Usage {
-            prompt_tokens: u32,
-        }
-
-        let resp = self
-            .client
-            .post("https://api.openai.com/v1/embeddings")
-            .bearer_auth(&self.api_key)
-            .json(&Req { model, input: text })
-            .send()
-            .await
-            .map_err(|e| {
-                AppError::ExternalService(format!("OpenAI embedding request failed: {e}"))
-            })?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(AppError::ExternalService(format!(
-                "OpenAI embedding API error ({status}): {body}"
-            )));
-        }
-
-        let data: Resp = resp
-            .json()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Embedding parse error: {e}")))?;
-
-        let embedding = data
-            .data
-            .into_iter()
-            .next()
-            .map(|d| d.embedding)
-            .ok_or_else(|| AppError::ExternalService("No embedding in response".into()))?;
-
-        Ok(EmbeddingResponse {
-            embedding,
-            model: model.to_string(),
-            usage: LlmUsage::embedding(data.usage.prompt_tokens),
-        })
     }
 }
 
