@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use crate::config::SETTINGS;
 use crate::models::{AppError, SupabaseUser, UserProfile};
+use crate::services::common::build_http_client;
 
 #[derive(Deserialize)]
 struct TokenResp {
@@ -26,11 +27,8 @@ impl SupabaseAuthService {
     ///
     /// Returns [`AppError::Configuration`] if the HTTP client cannot be built.
     pub fn new() -> Result<Self, AppError> {
-        let client = Client::builder()
-            .build()
-            .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
         Ok(Self {
-            client,
+            client: build_http_client()?,
             supabase_url: SETTINGS.supabase.url.clone(),
             service_key: SETTINGS.supabase.service_key.clone(),
         })

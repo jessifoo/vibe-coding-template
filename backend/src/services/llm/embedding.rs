@@ -10,6 +10,7 @@ use async_trait::async_trait;
 
 use crate::config::SETTINGS;
 use crate::models::{AppError, EmbeddingResponse, LlmProvider, LlmUsage};
+use crate::services::common::require_api_key;
 
 // ---------------------------------------------------------------------------
 // Trait
@@ -126,14 +127,4 @@ impl EmbeddingServiceFactory {
             }
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn require_api_key(slot: Option<&String>, var_name: &str) -> Result<String, AppError> {
-    slot.filter(|k| !k.is_empty())
-        .cloned()
-        .ok_or_else(|| AppError::Configuration(format!("{var_name} not configured")))
 }

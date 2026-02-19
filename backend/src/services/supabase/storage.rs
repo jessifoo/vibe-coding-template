@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::config::SETTINGS;
 use crate::models::AppError;
+use crate::services::common::build_http_client;
 
 #[derive(serde::Serialize)]
 struct CreateBucket<'a> {
@@ -29,11 +30,8 @@ impl SupabaseStorageService {
     ///
     /// Returns [`AppError::Configuration`] if the HTTP client cannot be built.
     pub fn new(bucket_name: &str) -> Result<Self, AppError> {
-        let client = Client::builder()
-            .build()
-            .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
         Ok(Self {
-            client,
+            client: build_http_client()?,
             base_url: format!("{}/storage/v1", SETTINGS.supabase.url),
             service_key: SETTINGS.supabase.service_key.clone(),
             bucket_name: bucket_name.to_string(),

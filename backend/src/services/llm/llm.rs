@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::SETTINGS;
 use crate::models::{AppError, LlmProvider, LlmUsage, TextGenerationResponse};
+use crate::services::common::{build_http_client, require_api_key};
 
 // ---------------------------------------------------------------------------
 // Trait
@@ -117,10 +118,10 @@ pub struct AnthropicService {
 
 impl AnthropicService {
     fn new(api_key: String) -> Result<Self, AppError> {
-        let client = Client::builder()
-            .build()
-            .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
-        Ok(Self { client, api_key })
+        Ok(Self {
+            client: build_http_client()?,
+            api_key,
+        })
     }
 }
 
@@ -234,14 +235,4 @@ impl LlmServiceFactory {
             }
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn require_api_key(slot: Option<&String>, var_name: &str) -> Result<String, AppError> {
-    slot.filter(|k| !k.is_empty())
-        .cloned()
-        .ok_or_else(|| AppError::Configuration(format!("{var_name} not configured")))
 }
