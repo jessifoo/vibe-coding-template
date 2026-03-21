@@ -127,3 +127,35 @@ Required environment variables:
 - Implement proper RLS policies for data security
 
 When adding new features, follow the established patterns and maintain consistency with the existing codebase structure.
+
+## Cursor Cloud specific instructions
+
+### Python version
+The backend requires Python 3.11 (not 3.12) because `qdrant-client==1.5.*` in `backend/requirements.txt` needs Python <3.12. A virtual environment is set up at `backend/.venv` using Python 3.11. Always activate it before running backend commands: `source /workspace/backend/.venv/bin/activate`.
+
+### Running services natively (without Docker)
+
+**Backend** (port 8000):
+```bash
+source /workspace/backend/.venv/bin/activate
+cd /workspace/backend
+PYTHONPATH=/workspace/backend uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+Requires `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` env vars (or `.env` at repo root). These have no defaults and the app will crash at import time without them.
+
+**Frontend** (port 3000):
+```bash
+cd /workspace/frontend
+npm run dev
+```
+Needs `frontend/.env.local` with `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL`.
+
+### Lint
+- Frontend: `cd frontend && npx next lint` (uses `.eslintrc.json` with `next/core-web-vitals`)
+- Backend: `source backend/.venv/bin/activate && cd backend && flake8 app --max-line-length=120`
+
+### Key gotchas
+- No lockfile exists for the frontend; `npm install` generates `package-lock.json` at install time.
+- The root `.env` file is loaded by the backend's `pydantic-settings` (via `env_file = ".env"` in `Settings.Config`). When running the backend from `backend/` dir, env vars must be set explicitly or the `.env` must be in the CWD or passed via environment.
+- Supabase clients are lazily instantiated in service class constructors, so the backend starts fine with placeholder Supabase credentials; actual Supabase calls will fail at request time.
+- Qdrant gracefully falls back to in-memory mode when `QDRANT_URL` is empty.
