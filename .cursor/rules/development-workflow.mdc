@@ -83,7 +83,7 @@ make db-status
 ### Code Quality
 
 #### Backend Code Quality (Rust)
-- Follow Axum standards from `.cursor/rules/backend/fastapi-standards.mdc`
+- Follow Axum standards from `.cursor/rules/backend/fastapi-standards.mdc` (Rust/Axum backend standards)
 - Run `cargo clippy` - no warnings allowed
 - Run `cargo fmt` before committing
 - Use `Result<T, AppError>` for all fallible operations

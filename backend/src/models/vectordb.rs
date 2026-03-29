@@ -36,7 +36,7 @@ pub struct DocumentInput {
 }
 
 fn default_embedding_model() -> String {
-    "text-embedding-ada-002".to_string()
+    "text-embedding-3-small".to_string()
 }
 
 /// Response from adding documents.
@@ -132,6 +132,6 @@ mod tests {
         let json = r#"{"query_text": "hello"}"#;
         let query: SearchQuery = serde_json::from_str(json).unwrap();
         assert_eq!(query.limit, 10);
-        assert_eq!(query.embedding_model, "text-embedding-ada-002");
+        assert_eq!(query.embedding_model, "text-embedding-3-small");
     }
 }

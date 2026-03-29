@@ -23,6 +23,7 @@ impl SupabaseAuthService {
     /// Returns an error if the HTTP client cannot be created.
     pub fn new() -> Result<Self, AppError> {
         let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| AppError::Configuration(format!("Failed to create HTTP client: {e}")))?;
 
@@ -74,7 +75,7 @@ impl SupabaseAuthService {
     ///
     /// # Arguments
     ///
-    /// * `provider` - OAuth provider (google, linkedin)
+    /// * `provider` - OAuth provider (google, linkedin) - assumed to be validated by caller
     /// * `access_token` - Provider access token
     ///
     /// # Errors
@@ -85,13 +86,7 @@ impl SupabaseAuthService {
         provider: &str,
         access_token: &str,
     ) -> Result<String, AppError> {
-        // Validate provider
-        if !["google", "linkedin"].contains(&provider) {
-            return Err(AppError::BadRequest(format!(
-                "Unsupported provider: {provider}"
-            )));
-        }
-
+        // Note: Provider validation is handled by the ProviderTokenRequest validator
         let url = format!("{}/auth/v1/token?grant_type=id_token", self.supabase_url);
 
         #[derive(serde::Serialize)]
@@ -132,12 +127,6 @@ impl SupabaseAuthService {
         })?;
 
         Ok(token_response.access_token)
-    }
-}
-
-impl Default for SupabaseAuthService {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default SupabaseAuthService")
     }
 }
 

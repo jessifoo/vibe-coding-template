@@ -99,11 +99,20 @@ impl IntoResponse for AppError {
         let status_code = self.status_code();
         let error_message = self.to_string();
 
-        tracing::error!(
-            status_code = %status_code,
-            error = %error_message,
-            "Request failed"
-        );
+        // Log 4xx errors at WARN, 5xx errors at ERROR
+        if status_code.is_client_error() {
+            tracing::warn!(
+                status_code = %status_code,
+                error = %error_message,
+                "Client error"
+            );
+        } else {
+            tracing::error!(
+                status_code = %status_code,
+                error = %error_message,
+                "Server error"
+            );
+        }
 
         ApiErrorResponse::new(status_code, error_message).into_response()
     }

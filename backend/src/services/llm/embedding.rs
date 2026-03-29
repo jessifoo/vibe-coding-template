@@ -46,6 +46,7 @@ impl OpenAiEmbeddingService {
     /// Returns an error if the HTTP client cannot be created.
     pub fn new(api_key: String) -> Result<Self, AppError> {
         let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| AppError::Configuration(format!("Failed to create HTTP client: {e}")))?;
 
@@ -190,18 +191,11 @@ impl EmbeddingServiceFactory {
                 Ok(Box::new(OpenAiEmbeddingService::new(api_key)?))
             }
             LlmProvider::Anthropic => {
-                let api_key = SETTINGS
-                    .llm
-                    .anthropic_api_key
-                    .clone()
-                    .filter(|k| !k.is_empty())
-                    .ok_or_else(|| {
-                        AppError::Configuration(
-                            "Anthropic API key not configured. Please set ANTHROPIC_API_KEY."
-                                .to_string(),
-                        )
-                    })?;
-                Ok(Box::new(AnthropicEmbeddingService::new(api_key)))
+                // Anthropic does not support embeddings - fail fast
+                Err(AppError::BadRequest(
+                    "Anthropic does not support embeddings. Please use OpenAI (provider: 'openai')."
+                        .to_string(),
+                ))
             }
         }
     }

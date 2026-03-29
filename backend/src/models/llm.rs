@@ -90,7 +90,7 @@ pub struct TextGenerationRequest {
 }
 
 fn default_text_model() -> String {
-    "gpt-3.5-turbo".to_string()
+    "gpt-4o-mini".to_string()
 }
 
 const fn default_max_tokens() -> u32 {
@@ -131,7 +131,7 @@ pub struct EmbeddingRequest {
 }
 
 fn default_embedding_model() -> String {
-    "text-embedding-ada-002".to_string()
+    "text-embedding-3-small".to_string()
 }
 
 /// Response from embedding creation.
@@ -171,5 +171,73 @@ mod tests {
     fn test_provider_display() {
         assert_eq!(LlmProvider::OpenAI.to_string(), "openai");
         assert_eq!(LlmProvider::Anthropic.to_string(), "anthropic");
+    }
+
+    #[test]
+    fn test_provider_serialization() {
+        let provider = LlmProvider::OpenAI;
+        let json = serde_json::to_string(&provider).unwrap();
+        assert_eq!(json, "\"openai\"");
+
+        let provider = LlmProvider::Anthropic;
+        let json = serde_json::to_string(&provider).unwrap();
+        assert_eq!(json, "\"anthropic\"");
+    }
+
+    #[test]
+    fn test_provider_deserialization() {
+        let provider: LlmProvider = serde_json::from_str("\"openai\"").unwrap();
+        assert_eq!(provider, LlmProvider::OpenAI);
+
+        let provider: LlmProvider = serde_json::from_str("\"anthropic\"").unwrap();
+        assert_eq!(provider, LlmProvider::Anthropic);
+    }
+
+    #[test]
+    fn test_llm_usage_serialization() {
+        let usage = LlmUsage::completion(100, 50);
+        let json = serde_json::to_value(&usage).unwrap();
+        assert_eq!(json["prompt_tokens"], 100);
+        assert_eq!(json["completion_tokens"], 50);
+        assert_eq!(json["total_tokens"], 150);
+    }
+
+    #[test]
+    fn test_text_generation_request_validation_empty_prompt() {
+        use validator::Validate;
+        let request = TextGenerationRequest {
+            prompt: String::new(),
+            model: "gpt-4o-mini".to_string(),
+            max_tokens: 100,
+            temperature: 0.7,
+            provider: LlmProvider::OpenAI,
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_text_generation_request_validation_invalid_max_tokens() {
+        use validator::Validate;
+        let request = TextGenerationRequest {
+            prompt: "test".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            max_tokens: 5000, // exceeds max
+            temperature: 0.7,
+            provider: LlmProvider::OpenAI,
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_text_generation_request_validation_invalid_temperature() {
+        use validator::Validate;
+        let request = TextGenerationRequest {
+            prompt: "test".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            max_tokens: 100,
+            temperature: 3.0, // exceeds max
+            provider: LlmProvider::OpenAI,
+        };
+        assert!(request.validate().is_err());
     }
 }

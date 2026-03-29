@@ -50,6 +50,31 @@ impl LlmService for OpenAiService {
         max_tokens: u32,
         temperature: f32,
     ) -> Result<TextGenerationResponse, AppError> {
+        // Build request payload
+        #[derive(serde::Serialize)]
+        struct ChatRequest<'a> {
+            model: &'a str,
+            messages: Vec<Message<'a>>,
+            max_tokens: u32,
+            temperature: f32,
+        }
+
+        #[derive(serde::Serialize)]
+        struct Message<'a> {
+            role: &'a str,
+            content: &'a str,
+        }
+
+        let request = ChatRequest {
+            model,
+            messages: vec![Message {
+                role: "user",
+                content: prompt,
+            }],
+            max_tokens,
+            temperature,
+        };
+
         let response = self.client
             .post("https://api.openai.com/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
@@ -57,7 +82,7 @@ impl LlmService for OpenAiService {
             .send()
             .await
             .map_err(|e| AppError::ExternalService(e.to_string()))?;
-        
+
         // Parse and return response
     }
 }
@@ -79,6 +104,31 @@ impl LlmService for AnthropicService {
         max_tokens: u32,
         temperature: f32,
     ) -> Result<TextGenerationResponse, AppError> {
+        // Build request payload matching Anthropic's /v1/messages schema
+        #[derive(serde::Serialize)]
+        struct MessagesRequest<'a> {
+            model: &'a str,
+            messages: Vec<Message<'a>>,
+            max_tokens: u32,
+            temperature: f32,
+        }
+
+        #[derive(serde::Serialize)]
+        struct Message<'a> {
+            role: &'a str,
+            content: &'a str,
+        }
+
+        let request = MessagesRequest {
+            model,
+            messages: vec![Message {
+                role: "user",
+                content: prompt,
+            }],
+            max_tokens,
+            temperature,
+        };
+
         let response = self.client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.api_key)
@@ -87,7 +137,7 @@ impl LlmService for AnthropicService {
             .send()
             .await
             .map_err(|e| AppError::ExternalService(e.to_string()))?;
-        
+
         // Parse and return response
     }
 }
@@ -254,3 +304,6 @@ async fn call_openai(&self, request: &Request) -> Result<Response, AppError> {
 4. **Use appropriate models** for the task
 5. **Set reasonable defaults** for parameters
 6. **Never expose API keys** in responses
+7. **Implement retry strategy** with exponential backoff for transient failures (network errors, 429/503 status codes)
+8. **Configure per-call timeouts** to prevent indefinite hangs (typically 30-60 seconds for LLM requests)
+9. **Estimate and count tokens** client-side before requests to validate against limits and prevent costly overruns

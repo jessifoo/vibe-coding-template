@@ -42,6 +42,7 @@ Always use the `#[axum::debug_handler]` attribute for better error messages:
 
 ```rust
 use axum::{extract::Json, http::HeaderMap, routing::post, Router};
+use validator::Validate;
 use crate::models::{AppError, CreateItemRequest, ItemResponse};
 
 pub fn router() -> Router {
@@ -57,15 +58,14 @@ async fn create_item(
 ) -> Result<Json<ItemResponse>, AppError> {
     // 1. Authenticate
     let user = authenticate(&headers).await?;
-    
+
     // 2. Validate
-    use validator::Validate;
     request.validate().map_err(AppError::from)?;
-    
+
     // 3. Execute business logic
     let service = MyService::new()?;
     let result = service.create_item(&request).await?;
-    
+
     // 4. Return response
     Ok(Json(result))
 }
@@ -132,11 +132,10 @@ pub struct CreateItemRequest {
     /// Item name
     #[validate(length(min = 1, max = 100))]
     pub name: String,
-    
+
     /// Optional description
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    
+
     /// Item count (must be positive)
     #[serde(default = "default_count")]
     #[validate(range(min = 1, max = 1000))]
@@ -286,8 +285,8 @@ unsafe_code = "forbid"
 all = "warn"
 pedantic = "warn"
 nursery = "warn"
-unwrap_used = "warn"
-expect_used = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
 ```
 
 **Key rules:**

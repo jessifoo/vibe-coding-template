@@ -32,7 +32,7 @@ The following are **strictly forbidden**:
 | ❌ Forbidden | ✅ Required |
 |-------------|-------------|
 | `any` type in TypeScript | Explicit interfaces/types |
-| `.unwrap()` in Rust | `?` operator or explicit match |
+| `.unwrap()` in Rust (except in tests or main) | `?` operator or explicit match |
 | `// @ts-ignore` | Fix the type error properly |
 | Commented-out code | Delete or document why kept |
 | Magic numbers | Named constants |

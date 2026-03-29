@@ -15,6 +15,12 @@ Use this template when creating new service classes for external integrations.
 //!
 //! This module provides the `ItemService` trait and its implementation
 //! for interacting with the item storage backend.
+//!
+//! Dependencies (add to Cargo.toml):
+//! ```toml
+//! uuid = { version = "1.0", features = ["v4", "serde"] }
+//! chrono = { version = "0.4", features = ["serde"] }
+//! ```
 
 use async_trait::async_trait;
 use reqwest::Client;
@@ -39,7 +45,7 @@ pub struct Item {
 }
 
 /// Request to create an item.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateItemData {
     pub user_id: String,
     pub name: String,
@@ -47,7 +53,7 @@ pub struct CreateItemData {
 }
 
 /// Request to update an item.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateItemData {
     pub name: Option<String>,
     pub description: Option<String>,
@@ -164,6 +170,31 @@ impl SupabaseItemService {
             ("Authorization", format!("Bearer {}", self.service_key)),
         ]
     }
+
+    /// Helper to send a request with auth headers and error handling.
+    async fn send_request(
+        &self,
+        mut request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, AppError> {
+        // Add auth headers
+        for (key, value) in self.auth_headers() {
+            request = request.header(key, value);
+        }
+
+        // Send request
+        let response = request
+            .send()
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
+
+        // Check status
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(format!("Request failed: {error}")));
+        }
+
+        Ok(response)
+    }
 }
 
 #[async_trait]
@@ -174,20 +205,7 @@ impl ItemService for SupabaseItemService {
             self.base_url, user_id
         );
 
-        let mut request = self.client.get(&url);
-        for (key, value) in self.auth_headers() {
-            request = request.header(key, value);
-        }
-
-        let response = request
-            .send()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            return Err(AppError::ExternalService(format!("List failed: {error}")));
-        }
+        let response = self.send_request(self.client.get(&url)).await?;
 
         response
             .json()
@@ -201,20 +219,7 @@ impl ItemService for SupabaseItemService {
             self.base_url, id, user_id
         );
 
-        let mut request = self.client.get(&url);
-        for (key, value) in self.auth_headers() {
-            request = request.header(key, value);
-        }
-
-        let response = request
-            .send()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            return Err(AppError::ExternalService(format!("Get failed: {error}")));
-        }
+        let response = self.send_request(self.client.get(&url)).await?;
 
         let items: Vec<Item> = response
             .json()
@@ -227,23 +232,15 @@ impl ItemService for SupabaseItemService {
     async fn create(&self, data: &CreateItemData) -> Result<Item, AppError> {
         let url = format!("{}/items", self.base_url);
 
-        let mut request = self.client.post(&url);
-        for (key, value) in self.auth_headers() {
-            request = request.header(key, value);
-        }
-
-        let response = request
-            .header("Content-Type", "application/json")
-            .header("Prefer", "return=representation")
-            .json(data)
-            .send()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            return Err(AppError::ExternalService(format!("Create failed: {error}")));
-        }
+        let response = self
+            .send_request(
+                self.client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Prefer", "return=representation")
+                    .json(data),
+            )
+            .await?;
 
         let mut items: Vec<Item> = response
             .json()
@@ -266,23 +263,15 @@ impl ItemService for SupabaseItemService {
             self.base_url, id, user_id
         );
 
-        let mut request = self.client.patch(&url);
-        for (key, value) in self.auth_headers() {
-            request = request.header(key, value);
-        }
-
-        let response = request
-            .header("Content-Type", "application/json")
-            .header("Prefer", "return=representation")
-            .json(data)
-            .send()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            return Err(AppError::ExternalService(format!("Update failed: {error}")));
-        }
+        let response = self
+            .send_request(
+                self.client
+                    .patch(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Prefer", "return=representation")
+                    .json(data),
+            )
+            .await?;
 
         let mut items: Vec<Item> = response
             .json()
@@ -300,20 +289,7 @@ impl ItemService for SupabaseItemService {
             self.base_url, id, user_id
         );
 
-        let mut request = self.client.delete(&url);
-        for (key, value) in self.auth_headers() {
-            request = request.header(key, value);
-        }
-
-        let response = request
-            .send()
-            .await
-            .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
-
-        if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            return Err(AppError::ExternalService(format!("Delete failed: {error}")));
-        }
+        self.send_request(self.client.delete(&url)).await?;
 
         Ok(())
     }
@@ -344,6 +320,8 @@ impl ItemServiceFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use uuid::Uuid;
 
     /// Mock implementation for testing.
     pub struct MockItemService {
@@ -379,12 +357,12 @@ mod tests {
 
         async fn create(&self, data: &CreateItemData) -> Result<Item, AppError> {
             let item = Item {
-                id: uuid::Uuid::new_v4().to_string(),
+                id: Uuid::new_v4().to_string(),
                 user_id: data.user_id.clone(),
                 name: data.name.clone(),
                 description: data.description.clone(),
-                created_at: chrono::Utc::now().to_rfc3339(),
-                updated_at: chrono::Utc::now().to_rfc3339(),
+                created_at: Utc::now().to_rfc3339(),
+                updated_at: Utc::now().to_rfc3339(),
             };
             self.items.lock().unwrap().push(item.clone());
             Ok(item)
@@ -408,7 +386,7 @@ mod tests {
             if let Some(desc) = &data.description {
                 item.description = Some(desc.clone());
             }
-            item.updated_at = chrono::Utc::now().to_rfc3339();
+            item.updated_at = Utc::now().to_rfc3339();
 
             Ok(item.clone())
         }

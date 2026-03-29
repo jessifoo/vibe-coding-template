@@ -15,7 +15,7 @@ These guidelines ensure AI assistants produce high-quality, maintainable code.
 - **NEVER** use `.unwrap()` or `.expect()` in Rust (except in tests or main)
 - **NEVER** use `// @ts-ignore` or `// @ts-nocheck`
 - **NEVER** suppress linter warnings without documented justification
-- **NEVER** leave TODO comments without creating an issue/task
+- **NEVER** leave TODO comments without sufficient context and a tracking reference (issue/task ID)
 - **NEVER** commit commented-out code
 
 ### 2. Type Safety is Non-Negotiable
@@ -68,22 +68,27 @@ pub async fn get_user(id: &str) -> User {
 
 ### TypeScript Frontend Standards
 ```typescript
-// ✅ CORRECT: Full type definitions
-interface UserProfile {
-  id: string;
-  email: string;
-  fullName: string | null;
-}
+// ✅ CORRECT: Full type definitions with runtime validation
+import { z } from 'zod';
+
+const UserProfileSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  fullName: z.string().nullable(),
+});
+
+type UserProfile = z.infer<typeof UserProfileSchema>;
 
 async function fetchUser(id: string): Promise<UserProfile> {
   const response = await fetch(`/api/users/${id}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch user: ${response.status}`);
   }
-  return response.json() as Promise<UserProfile>;
+  const data = await response.json();
+  return UserProfileSchema.parse(data); // Runtime validation
 }
 
-// ❌ WRONG: Missing types, no error handling
+// ❌ WRONG: Missing types, no error handling, no validation
 async function fetchUser(id) {
   const response = await fetch(`/api/users/${id}`);
   return response.json();
@@ -185,7 +190,7 @@ When reviewing AI-generated code, check for:
 2. **Check existing code** for patterns to follow
 3. **Keep it simple** - avoid over-engineering
 4. **Document assumptions** in comments
-5. **Add TODOs** for future improvements with context
+5. **Add TODOs for future improvements** with sufficient context and a tracking reference (issue/task ID)
 
 ## 🔄 Refactoring Rules
 

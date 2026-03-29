@@ -11,8 +11,9 @@ pub struct UserProfile {
     /// Unique user identifier
     pub id: String,
 
-    /// User email address
-    pub email: String,
+    /// User email address (may be None if not provided by auth provider)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
 
     /// User's full name
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -104,7 +105,7 @@ impl From<SupabaseUser> for UserProfile {
     fn from(user: SupabaseUser) -> Self {
         Self {
             id: user.id,
-            email: user.email.unwrap_or_default(),
+            email: user.email,
             full_name: user.user_metadata.full_name,
             avatar_url: user.user_metadata.avatar_url,
         }

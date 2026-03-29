@@ -8,7 +8,20 @@ pub mod error;
 pub mod llm;
 pub mod vectordb;
 
-pub use auth::*;
-pub use error::*;
-pub use llm::*;
-pub use vectordb::*;
+// Explicit re-exports from auth module
+pub use auth::{ProviderTokenRequest, SupabaseUser, TokenResponse, UserMetadata, UserProfile};
+
+// Explicit re-exports from error module
+pub use error::{ApiErrorResponse, AppError};
+
+// Explicit re-exports from llm module
+pub use llm::{
+    EmbeddingRequest, EmbeddingResponse, LlmProvider, LlmUsage, TextGenerationRequest,
+    TextGenerationResponse,
+};
+
+// Explicit re-exports from vectordb module
+pub use vectordb::{
+    DeleteDocumentsRequest, Document, DocumentContent, DocumentInput, DocumentUploadResponse,
+    SearchQuery, SearchResult,
+};

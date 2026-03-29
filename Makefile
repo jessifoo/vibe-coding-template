@@ -1,6 +1,6 @@
 .PHONY: dev dev-frontend dev-backend prod prod-frontend prod-backend clean help
 .PHONY: db-migration-new db-apply db-list db-push db-status
-.PHONY: backend-build backend-test backend-lint
+.PHONY: install-frontend build-frontend install-backend build-backend test-backend lint-backend check-backend fmt-backend ci
 
 # Default target
 .DEFAULT_GOAL := help

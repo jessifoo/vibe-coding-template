@@ -29,6 +29,7 @@ impl SupabaseStorageService {
     /// Returns an error if the HTTP client cannot be created.
     pub fn new(bucket_name: &str) -> Result<Self, AppError> {
         let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| AppError::Configuration(format!("Failed to create HTTP client: {e}")))?;
 

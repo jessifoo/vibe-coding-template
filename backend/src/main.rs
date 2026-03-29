@@ -102,7 +102,7 @@ fn build_cors_layer() -> CorsLayer {
             tracing::warn!("No CORS origins configured, allowing any origin (development mode)");
             CorsLayer::new().allow_origin(Any)
         } else {
-            tracing::warn!("No CORS origins configured in production mode");
+            tracing::warn!("No CORS origins configured in production mode - CORS will reject all requests");
             CorsLayer::new()
         }
     } else {

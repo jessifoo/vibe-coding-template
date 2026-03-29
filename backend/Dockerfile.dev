@@ -3,20 +3,29 @@
 
 FROM rust:1.83-slim
 
+# Create non-root user for security
+RUN groupadd -g 1000 appuser && \
+    useradd -m -u 1000 -g appuser appuser
+
 WORKDIR /app
 
 # Install build dependencies and development tools
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    curl \
+# Package versions pinned for reproducible builds
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config=1.8.1-1 \
+    libssl-dev=3.0.13-1~deb12u1 \
+    curl=7.88.1-10+deb12u7 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install cargo-watch for hot reloading
+# Set cargo home for non-root user
+ENV CARGO_HOME=/home/appuser/.cargo
+ENV PATH="/home/appuser/.cargo/bin:${PATH}"
+
+# Install cargo-watch for hot reloading as root
 RUN cargo install cargo-watch
 
 # Copy manifests first for dependency caching
-COPY Cargo.toml Cargo.lock* ./
+COPY --chown=appuser:appuser Cargo.toml Cargo.lock* ./
 
 # Create dummy source for dependency compilation
 RUN mkdir src && \
@@ -27,7 +36,13 @@ RUN mkdir src && \
 RUN cargo build && \
     rm -rf src
 
+# Ensure ownership of project directories
+RUN chown -R appuser:appuser /app /home/appuser/.cargo
+
 # Source will be mounted via volume in docker-compose
+
+# Switch to non-root user
+USER appuser
 
 # Expose port
 EXPOSE 8000
@@ -38,6 +53,7 @@ ENV HOST=0.0.0.0
 ENV PORT=8000
 ENV RUST_LOG=backend=debug,tower_http=debug,axum=debug
 ENV RUST_BACKTRACE=1
+ENV HOME=/home/appuser
 
 # Run with hot reload using cargo-watch
 CMD ["cargo", "watch", "-x", "run"]

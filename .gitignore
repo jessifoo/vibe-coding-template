@@ -68,3 +68,6 @@ qdrant_data/
 .supabase
 supabase/.branches
 supabase/.temp
+
+# Rust build artifacts
+backend/target/

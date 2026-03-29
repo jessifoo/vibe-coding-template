@@ -24,6 +24,7 @@ impl SupabaseDatabaseService {
     /// Returns an error if the HTTP client cannot be created.
     pub fn new() -> Result<Self, AppError> {
         let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| AppError::Configuration(format!("Failed to create HTTP client: {e}")))?;
 
@@ -250,11 +251,5 @@ impl SupabaseDatabaseService {
         }
 
         Ok(true)
-    }
-}
-
-impl Default for SupabaseDatabaseService {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default SupabaseDatabaseService")
     }
 }

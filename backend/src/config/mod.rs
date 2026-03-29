@@ -10,7 +10,7 @@ use std::env;
 /// Global application settings, loaded once at startup.
 pub static SETTINGS: Lazy<Settings> = Lazy::new(|| {
     Settings::from_env().unwrap_or_else(|e| {
-        tracing::error!("Failed to load settings: {}", e);
+        eprintln!("Failed to load settings: {}", e);
         panic!("Failed to load settings: {}", e);
     })
 });
@@ -169,10 +169,16 @@ impl Settings {
         let _ = dotenvy::dotenv();
 
         // Parse environment
-        let environment = env::var("ENVIRONMENT")
-            .unwrap_or_else(|_| "development".to_string())
-            .parse()
-            .unwrap_or(Environment::Development);
+        let environment = match env::var("ENVIRONMENT") {
+            Ok(env_str) => env_str.parse().unwrap_or_else(|_| {
+                eprintln!(
+                    "Warning: Invalid ENVIRONMENT value '{}', falling back to Development",
+                    env_str
+                );
+                Environment::Development
+            }),
+            Err(_) => Environment::Development,
+        };
 
         // Parse server config
         let server = ServerConfig {
@@ -267,5 +273,62 @@ mod tests {
             "production".parse::<Environment>().unwrap(),
             Environment::Production
         );
+    }
+
+    #[test]
+    fn test_environment_aliases() {
+        assert_eq!(
+            "dev".parse::<Environment>().unwrap(),
+            Environment::Development
+        );
+        assert_eq!(
+            "prod".parse::<Environment>().unwrap(),
+            Environment::Production
+        );
+        assert_eq!(
+            "stage".parse::<Environment>().unwrap(),
+            Environment::Staging
+        );
+        assert_eq!(
+            "staging".parse::<Environment>().unwrap(),
+            Environment::Staging
+        );
+    }
+
+    #[test]
+    fn test_environment_invalid_value() {
+        assert!("invalid".parse::<Environment>().is_err());
+    }
+
+    #[test]
+    fn test_llm_config_has_openai() {
+        let config = LlmConfig {
+            openai_api_key: Some("test_key".to_string()),
+            anthropic_api_key: None,
+        };
+        assert!(config.has_openai());
+        assert!(!config.has_anthropic());
+
+        let empty_config = LlmConfig {
+            openai_api_key: Some(String::new()),
+            anthropic_api_key: None,
+        };
+        assert!(!empty_config.has_openai());
+    }
+
+    #[test]
+    fn test_llm_config_has_anthropic() {
+        let config = LlmConfig {
+            openai_api_key: None,
+            anthropic_api_key: Some("test_key".to_string()),
+        };
+        assert!(!config.has_openai());
+        assert!(config.has_anthropic());
+
+        let empty_config = LlmConfig {
+            openai_api_key: None,
+            anthropic_api_key: Some(String::new()),
+        };
+        assert!(!empty_config.has_anthropic());
     }
 }
