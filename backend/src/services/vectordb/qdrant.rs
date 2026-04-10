@@ -13,6 +13,9 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Metadata key used to scope documents to an owner.
+pub const OWNER_ID_METADATA_KEY: &str = "owner_id";
+
 /// Service for interacting with Qdrant vector database.
 pub struct QdrantService {
     client: Qdrant,
@@ -294,23 +297,30 @@ impl QdrantService {
         Ok(results)
     }
 
-    /// Delete documents by their IDs.
+    /// Delete documents by IDs only when they belong to the specified owner.
     ///
-    /// # Arguments
-    ///
-    /// * `ids` - Document IDs to delete
+    /// IDs that do not belong to the owner are ignored by the filter.
     ///
     /// # Errors
     ///
-    /// Returns an error if deletion fails.
-    pub async fn delete(&self, ids: &[String]) -> Result<bool, AppError> {
+    /// Returns an error if the delete request to Qdrant fails.
+    pub async fn delete_owned_documents(
+        &self,
+        ids: &[String],
+        owner_id: &str,
+    ) -> Result<bool, AppError> {
         if ids.is_empty() {
             return Ok(true);
         }
 
-        let points: Vec<PointId> = ids.iter().map(|id| PointId::from(id.clone())).collect();
+        if owner_id.trim().is_empty() {
+            return Err(AppError::BadRequest(
+                "owner_id cannot be empty when deleting documents".to_string(),
+            ));
+        }
 
-        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(points);
+        let delete_filter = build_owner_scoped_delete_filter(ids, owner_id);
+        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(delete_filter);
 
         self.client
             .delete_points(delete_request)
@@ -319,8 +329,9 @@ impl QdrantService {
 
         tracing::info!(
             collection = %self.collection_name,
+            owner_id = %owner_id,
             count = ids.len(),
-            "Deleted documents from Qdrant"
+            "Deleted owner-scoped documents from Qdrant"
         );
 
         Ok(true)
@@ -342,5 +353,46 @@ fn extract_string_value(value: &qdrant_client::qdrant::Value) -> Option<String> 
     match &value.kind {
         Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => Some(s.clone()),
         _ => None,
+    }
+}
+
+fn build_owner_scoped_delete_filter(ids: &[String], owner_id: &str) -> Filter {
+    Filter::must([
+        Condition::has_id(ids.iter().cloned()),
+        Condition::matches(OWNER_ID_METADATA_KEY, owner_id.to_string()),
+    ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_owner_scoped_delete_filter, OWNER_ID_METADATA_KEY};
+    use qdrant_client::qdrant::{condition::ConditionOneOf, r#match::MatchValue};
+
+    #[test]
+    fn delete_filter_always_includes_owner_scope() {
+        let ids = vec!["id-1".to_string(), "id-2".to_string()];
+        let filter = build_owner_scoped_delete_filter(&ids, "user-123");
+
+        assert_eq!(filter.must.len(), 2);
+        let owner_condition = &filter.must[1];
+        let ConditionOneOf::Field(field) = owner_condition
+            .condition_one_of
+            .as_ref()
+            .expect("owner condition should be present")
+        else {
+            panic!("owner condition should be a field match")
+        };
+
+        assert_eq!(field.key, OWNER_ID_METADATA_KEY);
+        let match_value = field
+            .r#match
+            .as_ref()
+            .and_then(|m| m.match_value.clone())
+            .expect("owner field match value should be present");
+        match match_value {
+            MatchValue::Keyword(value) => assert_eq!(value, "user-123"),
+            MatchValue::Text(value) => assert_eq!(value, "user-123"),
+            _ => panic!("owner match should be a string-based match"),
+        }
     }
 }

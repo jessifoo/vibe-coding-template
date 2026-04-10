@@ -15,7 +15,9 @@ use crate::models::{
 };
 use crate::services::llm::EmbeddingServiceFactory;
 use crate::services::supabase::SupabaseAuthService;
-use crate::services::vectordb::qdrant::{DocumentData, QdrantService};
+use crate::services::vectordb::qdrant::{DocumentData, QdrantService, OWNER_ID_METADATA_KEY};
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 
 /// Create the vector database router.
 pub fn router() -> Router {
@@ -72,7 +74,14 @@ async fn add_documents(
     let metadata: Vec<_> = request
         .documents
         .iter()
-        .map(|d| d.metadata.clone())
+        .map(|d| {
+            let mut scoped_metadata = d.metadata.clone();
+            scoped_metadata.insert(
+                OWNER_ID_METADATA_KEY.to_string(),
+                JsonValue::String(user.id.clone()),
+            );
+            scoped_metadata
+        })
         .collect();
 
     // Add to vector database
@@ -120,13 +129,14 @@ async fn search_documents(
         .create_embedding(&query.query_text, &query.embedding_model)
         .await?;
 
-    // Search vector database
+    // Search vector database (always scoped to the authenticated user)
+    let scoped_filter = build_owner_scoped_filter(query.filter_metadata.as_ref(), &user.id);
     let vector_db = QdrantService::new().await?;
     let results = vector_db
         .search(
             &embedding_response.embedding,
             query.limit,
-            query.filter_metadata.as_ref(),
+            Some(&scoped_filter),
         )
         .await?;
 
@@ -160,7 +170,9 @@ async fn delete_documents(
 
     // Delete from vector database
     let vector_db = QdrantService::new().await?;
-    let success = vector_db.delete(&request.document_ids).await?;
+    let success = vector_db
+        .delete_owned_documents(&request.document_ids, &user.id)
+        .await?;
 
     if success {
         tracing::info!(
@@ -207,9 +219,43 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars()
-            .take(max_len)
-            .collect::<String>()
-            + "..."
+        s.chars().take(max_len).collect::<String>() + "..."
+    }
+}
+
+fn build_owner_scoped_filter(
+    filter_metadata: Option<&HashMap<String, JsonValue>>,
+    user_id: &str,
+) -> HashMap<String, JsonValue> {
+    let mut scoped_filter = filter_metadata.cloned().unwrap_or_default();
+    scoped_filter.insert(
+        OWNER_ID_METADATA_KEY.to_string(),
+        JsonValue::String(user_id.to_string()),
+    );
+    scoped_filter
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owner_scope_filter_is_always_enforced() {
+        let mut existing = HashMap::new();
+        existing.insert("topic".to_string(), JsonValue::String("rust".to_string()));
+        existing.insert(
+            OWNER_ID_METADATA_KEY.to_string(),
+            JsonValue::String("attacker-id".to_string()),
+        );
+
+        let filter = build_owner_scoped_filter(Some(&existing), "user-123");
+        assert_eq!(
+            filter.get(OWNER_ID_METADATA_KEY),
+            Some(&JsonValue::String("user-123".to_string()))
+        );
+        assert_eq!(
+            filter.get("topic"),
+            Some(&JsonValue::String("rust".to_string()))
+        );
     }
 }
