@@ -55,6 +55,24 @@ impl QdrantService {
         })
     }
 
+    /// Create a Qdrant service instance scoped to a specific user.
+    ///
+    /// This provides tenant isolation by assigning each user to a dedicated collection.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - Authenticated user identifier used for collection scoping
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if connection to Qdrant fails.
+    pub async fn new_for_user(user_id: &str) -> Result<Self, AppError> {
+        let mut service = Self::new().await?;
+        let user_namespace = sanitize_collection_component(user_id);
+        service.collection_name = format!("{}__{}", service.collection_name, user_namespace);
+        Ok(service)
+    }
+
     /// Ensure the collection exists, creating it if necessary.
     ///
     /// # Arguments
@@ -342,5 +360,42 @@ fn extract_string_value(value: &qdrant_client::qdrant::Value) -> Option<String> 
     match &value.kind {
         Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => Some(s.clone()),
         _ => None,
+    }
+}
+
+/// Sanitize a string so it can be safely used inside a Qdrant collection name.
+fn sanitize_collection_component(input: &str) -> String {
+    let mut sanitized = String::with_capacity(input.len());
+    for c in input.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            sanitized.push(c);
+        } else {
+            sanitized.push('_');
+        }
+    }
+
+    if sanitized.is_empty() {
+        "unknown-user".to_string()
+    } else {
+        sanitized
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_collection_component;
+
+    #[test]
+    fn sanitize_collection_component_replaces_unsupported_chars() {
+        let input = "user:abc/def@example.com";
+        let sanitized = sanitize_collection_component(input);
+        assert_eq!(sanitized, "user_abc_def_example_com");
+    }
+
+    #[test]
+    fn sanitize_collection_component_preserves_supported_chars() {
+        let input = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        let sanitized = sanitize_collection_component(input);
+        assert_eq!(sanitized, input);
     }
 }
