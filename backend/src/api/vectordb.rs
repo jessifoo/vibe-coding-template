@@ -78,7 +78,7 @@ async fn add_documents(
     // Add to vector database
     let vector_db = QdrantService::new().await?;
     let document_ids = vector_db
-        .add_documents(&documents, &embeddings, Some(&metadata))
+        .add_documents(&user.id, &documents, &embeddings, Some(&metadata))
         .await?;
 
     tracing::info!(
@@ -124,6 +124,7 @@ async fn search_documents(
     let vector_db = QdrantService::new().await?;
     let results = vector_db
         .search(
+            &user.id,
             &embedding_response.embedding,
             query.limit,
             query.filter_metadata.as_ref(),
@@ -160,7 +161,7 @@ async fn delete_documents(
 
     // Delete from vector database
     let vector_db = QdrantService::new().await?;
-    let success = vector_db.delete(&request.document_ids).await?;
+    let success = vector_db.delete(&user.id, &request.document_ids).await?;
 
     if success {
         tracing::info!(
@@ -207,9 +208,6 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars()
-            .take(max_len)
-            .collect::<String>()
-            + "..."
+        s.chars().take(max_len).collect::<String>() + "..."
     }
 }
