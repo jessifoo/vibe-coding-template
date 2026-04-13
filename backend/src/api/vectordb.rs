@@ -8,6 +8,8 @@ use axum::{
     routing::post,
     Router,
 };
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 
 use crate::models::{
     AppError, DeleteDocumentsRequest, DocumentInput, DocumentUploadResponse, LlmProvider,
@@ -15,7 +17,7 @@ use crate::models::{
 };
 use crate::services::llm::EmbeddingServiceFactory;
 use crate::services::supabase::SupabaseAuthService;
-use crate::services::vectordb::qdrant::{DocumentData, QdrantService};
+use crate::services::vectordb::qdrant::{DocumentData, QdrantService, OWNER_ID_PAYLOAD_KEY};
 
 /// Create the vector database router.
 pub fn router() -> Router {
@@ -72,13 +74,13 @@ async fn add_documents(
     let metadata: Vec<_> = request
         .documents
         .iter()
-        .map(|d| d.metadata.clone())
+        .map(|d| with_owner_metadata(&d.metadata, &user.id))
         .collect();
 
     // Add to vector database
     let vector_db = QdrantService::new().await?;
     let document_ids = vector_db
-        .add_documents(&documents, &embeddings, Some(&metadata))
+        .add_documents(&documents, &embeddings, Some(&metadata), &user.id)
         .await?;
 
     tracing::info!(
@@ -122,11 +124,13 @@ async fn search_documents(
 
     // Search vector database
     let vector_db = QdrantService::new().await?;
+    let scoped_filter = with_owner_filter(query.filter_metadata.as_ref(), &user.id);
     let results = vector_db
         .search(
             &embedding_response.embedding,
             query.limit,
-            query.filter_metadata.as_ref(),
+            Some(&scoped_filter),
+            &user.id,
         )
         .await?;
 
@@ -160,7 +164,7 @@ async fn delete_documents(
 
     // Delete from vector database
     let vector_db = QdrantService::new().await?;
-    let success = vector_db.delete(&request.document_ids).await?;
+    let success = vector_db.delete(&request.document_ids, &user.id).await?;
 
     if success {
         tracing::info!(
@@ -207,9 +211,79 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars()
-            .take(max_len)
-            .collect::<String>()
-            + "..."
+        s.chars().take(max_len).collect::<String>() + "..."
+    }
+}
+
+/// Add non-overridable owner metadata used for multi-tenant isolation.
+fn with_owner_metadata(
+    metadata: &HashMap<String, JsonValue>,
+    owner_id: &str,
+) -> HashMap<String, JsonValue> {
+    let mut scoped = metadata.clone();
+    scoped.insert(
+        OWNER_ID_PAYLOAD_KEY.to_string(),
+        JsonValue::String(owner_id.to_string()),
+    );
+    scoped
+}
+
+/// Build search filters that are always scoped to the authenticated user.
+fn with_owner_filter(
+    filter_metadata: Option<&HashMap<String, JsonValue>>,
+    owner_id: &str,
+) -> HashMap<String, JsonValue> {
+    let mut scoped = filter_metadata.cloned().unwrap_or_default();
+    scoped.insert(
+        OWNER_ID_PAYLOAD_KEY.to_string(),
+        JsonValue::String(owner_id.to_string()),
+    );
+    scoped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_owner_metadata_overwrites_user_supplied_owner_key() {
+        let mut metadata = HashMap::new();
+        metadata.insert("topic".to_string(), JsonValue::String("docs".to_string()));
+        metadata.insert(
+            OWNER_ID_PAYLOAD_KEY.to_string(),
+            JsonValue::String("attacker-id".to_string()),
+        );
+
+        let scoped = with_owner_metadata(&metadata, "real-user-id");
+
+        assert_eq!(
+            scoped.get(OWNER_ID_PAYLOAD_KEY),
+            Some(&JsonValue::String("real-user-id".to_string()))
+        );
+        assert_eq!(
+            scoped.get("topic"),
+            Some(&JsonValue::String("docs".to_string()))
+        );
+    }
+
+    #[test]
+    fn with_owner_filter_enforces_owner_even_when_filter_provided() {
+        let mut filter = HashMap::new();
+        filter.insert(
+            OWNER_ID_PAYLOAD_KEY.to_string(),
+            JsonValue::String("another-user".to_string()),
+        );
+        filter.insert("region".to_string(), JsonValue::String("us".to_string()));
+
+        let scoped = with_owner_filter(Some(&filter), "real-user-id");
+
+        assert_eq!(
+            scoped.get(OWNER_ID_PAYLOAD_KEY),
+            Some(&JsonValue::String("real-user-id".to_string()))
+        );
+        assert_eq!(
+            scoped.get("region"),
+            Some(&JsonValue::String("us".to_string()))
+        );
     }
 }

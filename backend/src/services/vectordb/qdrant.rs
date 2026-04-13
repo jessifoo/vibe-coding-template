@@ -5,13 +5,16 @@
 use crate::config::SETTINGS;
 use crate::models::{AppError, DocumentContent, SearchResult};
 use qdrant_client::qdrant::{
-    Condition, CreateCollectionBuilder, DeletePointsBuilder, Distance, Filter, PointId,
-    PointStruct, SearchPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
+    Condition, CreateCollectionBuilder, DeletePointsBuilder, Distance, Filter, GetPointsBuilder,
+    PointId, PointStruct, SearchPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
 };
 use qdrant_client::Qdrant;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use uuid::Uuid;
+
+/// Internal payload key used to scope vector data per authenticated user.
+pub const OWNER_ID_PAYLOAD_KEY: &str = "_owner_id";
 
 /// Service for interacting with Qdrant vector database.
 pub struct QdrantService {
@@ -117,6 +120,7 @@ impl QdrantService {
         documents: &[DocumentData],
         embeddings: &[Vec<f32>],
         metadata: Option<&[HashMap<String, JsonValue>]>,
+        owner_id: &str,
     ) -> Result<Vec<String>, AppError> {
         if documents.len() != embeddings.len() {
             return Err(AppError::BadRequest(format!(
@@ -171,6 +175,11 @@ impl QdrantService {
                         }
                     }
                 }
+                // Enforce owner scoping even if client supplied a conflicting value.
+                payload.insert(
+                    OWNER_ID_PAYLOAD_KEY.to_string(),
+                    qdrant_client::qdrant::Value::from(owner_id.to_string()),
+                );
 
                 PointStruct::new(id.clone(), embedding.clone(), payload)
             })
@@ -206,25 +215,29 @@ impl QdrantService {
         query_embedding: &[f32],
         limit: u32,
         filter_params: Option<&HashMap<String, JsonValue>>,
+        owner_id: &str,
     ) -> Result<Vec<SearchResult>, AppError> {
         // Ensure collection exists
         self.ensure_collection_exists(query_embedding.len() as u64)
             .await?;
 
         // Build filter if provided
-        let filter = filter_params.map(|params| {
-            let conditions: Vec<Condition> = params
-                .iter()
-                .map(|(key, value)| {
-                    Condition::matches(
-                        key.as_str(),
-                        value.to_string().trim_matches('"').to_string(),
-                    )
-                })
-                .collect();
-
-            Filter::must(conditions)
-        });
+        let mut conditions = vec![Condition::matches(
+            OWNER_ID_PAYLOAD_KEY,
+            owner_id.to_string(),
+        )];
+        if let Some(params) = filter_params {
+            conditions.extend(params.iter().filter_map(|(key, value)| {
+                if key == OWNER_ID_PAYLOAD_KEY {
+                    return None;
+                }
+                Some(Condition::matches(
+                    key.as_str(),
+                    value.to_string().trim_matches('"').to_string(),
+                ))
+            }));
+        }
+        let filter = Filter::must(conditions);
 
         let mut search_builder = SearchPointsBuilder::new(
             &self.collection_name,
@@ -233,9 +246,7 @@ impl QdrantService {
         )
         .with_payload(true);
 
-        if let Some(f) = filter {
-            search_builder = search_builder.filter(f);
-        }
+        search_builder = search_builder.filter(filter);
 
         let search_result = self
             .client
@@ -277,8 +288,10 @@ impl QdrantService {
                                 document.title = doc_map.get("title").cloned();
                             }
                         }
-                    } else if let Some(s) = extract_string_value(&value) {
-                        metadata.insert(key, JsonValue::String(s));
+                    } else if key != OWNER_ID_PAYLOAD_KEY {
+                        if let Some(s) = extract_string_value(&value) {
+                            metadata.insert(key, JsonValue::String(s));
+                        }
                     }
                 }
 
@@ -303,14 +316,44 @@ impl QdrantService {
     /// # Errors
     ///
     /// Returns an error if deletion fails.
-    pub async fn delete(&self, ids: &[String]) -> Result<bool, AppError> {
+    pub async fn delete(&self, ids: &[String], owner_id: &str) -> Result<bool, AppError> {
         if ids.is_empty() {
             return Ok(true);
         }
 
         let points: Vec<PointId> = ids.iter().map(|id| PointId::from(id.clone())).collect();
+        let points_response = self
+            .client
+            .get_points(
+                GetPointsBuilder::new(&self.collection_name, points.clone()).with_payload(true),
+            )
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Failed to fetch documents: {e}")))?;
+        let owned_points: Vec<PointId> = points_response
+            .result
+            .into_iter()
+            .filter_map(|point| {
+                let owner_matches = point
+                    .payload
+                    .get(OWNER_ID_PAYLOAD_KEY)
+                    .and_then(extract_string_value)
+                    .as_deref()
+                    == Some(owner_id);
+                if owner_matches {
+                    point.id
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if owned_points.len() != ids.len() {
+            return Err(AppError::Forbidden(
+                "One or more requested documents are not owned by the authenticated user"
+                    .to_string(),
+            ));
+        }
 
-        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(points);
+        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(owned_points);
 
         self.client
             .delete_points(delete_request)
