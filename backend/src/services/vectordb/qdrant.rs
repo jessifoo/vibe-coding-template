@@ -107,6 +107,7 @@ impl QdrantService {
     /// * `documents` - Documents with text and optional title
     /// * `embeddings` - Embedding vectors for each document
     /// * `metadata` - Optional metadata for each document
+    /// * `owner_user_id` - Authenticated user ID owning the inserted documents
     ///
     /// # Returns
     ///
@@ -207,6 +208,7 @@ impl QdrantService {
     /// * `query_embedding` - Embedding vector of the query
     /// * `limit` - Maximum number of results to return
     /// * `filter_params` - Optional metadata filters
+    /// * `owner_user_id` - Authenticated user ID for tenant scoping
     ///
     /// # Errors
     ///
@@ -298,6 +300,7 @@ impl QdrantService {
     /// # Arguments
     ///
     /// * `ids` - Document IDs to delete
+    /// * `owner_user_id` - Authenticated user ID for tenant scoping
     ///
     /// # Errors
     ///
@@ -363,9 +366,9 @@ fn build_owner_search_filter(
 
     if let Some(params) = filter_params {
         conditions.extend(
-            params
-                .iter()
-                .map(|(key, value)| Condition::matches(key.as_str(), stringify_filter_value(value))),
+            params.iter().map(|(key, value)| {
+                Condition::matches(key.as_str(), stringify_filter_value(value))
+            }),
         );
     }
 
@@ -401,7 +404,10 @@ mod tests {
     #[test]
     fn test_build_owner_search_filter_includes_owner_condition() {
         let mut params = HashMap::new();
-        params.insert("department".to_string(), JsonValue::String("ml".to_string()));
+        params.insert(
+            "department".to_string(),
+            JsonValue::String("ml".to_string()),
+        );
 
         let filter = build_owner_search_filter("user-123", Some(&params));
         let debug = format!("{filter:?}");
@@ -410,5 +416,17 @@ mod tests {
         assert!(debug.contains("user-123"));
         assert!(debug.contains("department"));
         assert!(debug.contains("ml"));
+    }
+
+    #[test]
+    fn test_build_owner_delete_filter_includes_owner_and_ids() {
+        let ids = vec!["doc-1".to_string(), "doc-2".to_string()];
+        let filter = build_owner_delete_filter("user-777", &ids);
+        let debug = format!("{filter:?}");
+
+        assert!(debug.contains(OWNER_USER_ID_FIELD));
+        assert!(debug.contains("user-777"));
+        assert!(debug.contains("doc-1"));
+        assert!(debug.contains("doc-2"));
     }
 }

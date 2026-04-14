@@ -208,9 +208,6 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars()
-            .take(max_len)
-            .collect::<String>()
-            + "..."
+        s.chars().take(max_len).collect::<String>() + "..."
     }
 }
