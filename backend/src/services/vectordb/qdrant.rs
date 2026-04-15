@@ -13,6 +13,11 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Payload key used to scope vector documents to the owner.
+const OWNER_ID_PAYLOAD_KEY: &str = "owner_id";
+/// Payload key where serialized document content is stored.
+const DOCUMENT_PAYLOAD_KEY: &str = "document";
+
 /// Service for interacting with Qdrant vector database.
 pub struct QdrantService {
     client: Qdrant,
@@ -117,6 +122,7 @@ impl QdrantService {
         documents: &[DocumentData],
         embeddings: &[Vec<f32>],
         metadata: Option<&[HashMap<String, JsonValue>]>,
+        owner_id: &str,
     ) -> Result<Vec<String>, AppError> {
         if documents.len() != embeddings.len() {
             return Err(AppError::BadRequest(format!(
@@ -154,7 +160,7 @@ impl QdrantService {
                     doc_content.insert("title".to_string(), JsonValue::String(title.clone()));
                 }
                 payload.insert(
-                    "document".to_string(),
+                    DOCUMENT_PAYLOAD_KEY.to_string(),
                     qdrant_client::qdrant::Value::from(
                         serde_json::to_string(&doc_content).unwrap_or_default(),
                     ),
@@ -163,14 +169,14 @@ impl QdrantService {
                 // Add metadata
                 if let Some(meta_list) = metadata {
                     if let Some(meta) = meta_list.get(i) {
-                        for (key, value) in meta {
-                            payload.insert(
-                                key.clone(),
-                                qdrant_client::qdrant::Value::from(value.to_string()),
-                            );
-                        }
+                        insert_sanitized_metadata(&mut payload, meta);
                     }
                 }
+
+                payload.insert(
+                    OWNER_ID_PAYLOAD_KEY.to_string(),
+                    qdrant_client::qdrant::Value::from(owner_id.to_string()),
+                );
 
                 PointStruct::new(id.clone(), embedding.clone(), payload)
             })
@@ -206,25 +212,14 @@ impl QdrantService {
         query_embedding: &[f32],
         limit: u32,
         filter_params: Option<&HashMap<String, JsonValue>>,
+        owner_id: &str,
     ) -> Result<Vec<SearchResult>, AppError> {
         // Ensure collection exists
         self.ensure_collection_exists(query_embedding.len() as u64)
             .await?;
 
-        // Build filter if provided
-        let filter = filter_params.map(|params| {
-            let conditions: Vec<Condition> = params
-                .iter()
-                .map(|(key, value)| {
-                    Condition::matches(
-                        key.as_str(),
-                        value.to_string().trim_matches('"').to_string(),
-                    )
-                })
-                .collect();
-
-            Filter::must(conditions)
-        });
+        // Always scope searches to the current authenticated owner.
+        let filter = build_owner_scoped_filter(owner_id, filter_params);
 
         let mut search_builder = SearchPointsBuilder::new(
             &self.collection_name,
@@ -233,9 +228,7 @@ impl QdrantService {
         )
         .with_payload(true);
 
-        if let Some(f) = filter {
-            search_builder = search_builder.filter(f);
-        }
+        search_builder = search_builder.filter(filter);
 
         let search_result = self
             .client
@@ -266,7 +259,7 @@ impl QdrantService {
                 };
 
                 for (key, value) in point.payload {
-                    if key == "document" {
+                    if key == DOCUMENT_PAYLOAD_KEY {
                         // Parse document JSON
                         if let Some(s) = extract_string_value(&value) {
                             if let Ok(doc_map) = serde_json::from_str::<HashMap<String, String>>(&s)
@@ -303,14 +296,13 @@ impl QdrantService {
     /// # Errors
     ///
     /// Returns an error if deletion fails.
-    pub async fn delete(&self, ids: &[String]) -> Result<bool, AppError> {
+    pub async fn delete_owned(&self, ids: &[String], owner_id: &str) -> Result<bool, AppError> {
         if ids.is_empty() {
             return Ok(true);
         }
 
-        let points: Vec<PointId> = ids.iter().map(|id| PointId::from(id.clone())).collect();
-
-        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(points);
+        let delete_filter = build_owner_scoped_delete_filter(ids, owner_id);
+        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(delete_filter);
 
         self.client
             .delete_points(delete_request)
@@ -342,5 +334,141 @@ fn extract_string_value(value: &qdrant_client::qdrant::Value) -> Option<String> 
     match &value.kind {
         Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => Some(s.clone()),
         _ => None,
+    }
+}
+
+/// Insert metadata into payload while protecting reserved internal keys.
+fn insert_sanitized_metadata(
+    payload: &mut HashMap<String, qdrant_client::qdrant::Value>,
+    metadata: &HashMap<String, JsonValue>,
+) {
+    for (key, value) in metadata {
+        if key == OWNER_ID_PAYLOAD_KEY || key == DOCUMENT_PAYLOAD_KEY {
+            continue;
+        }
+
+        payload.insert(
+            key.clone(),
+            qdrant_client::qdrant::Value::from(value.to_string()),
+        );
+    }
+}
+
+/// Build a mandatory owner-scoped filter, optionally extended with metadata filters.
+fn build_owner_scoped_filter(
+    owner_id: &str,
+    filter_params: Option<&HashMap<String, JsonValue>>,
+) -> Filter {
+    let mut conditions: Vec<Condition> = vec![Condition::matches(
+        OWNER_ID_PAYLOAD_KEY,
+        owner_id.to_string(),
+    )];
+
+    if let Some(params) = filter_params {
+        conditions.extend(params.iter().map(|(key, value)| {
+            Condition::matches(
+                key.as_str(),
+                value.to_string().trim_matches('"').to_string(),
+            )
+        }));
+    }
+
+    Filter::must(conditions)
+}
+
+/// Build a filter for deleting only caller-owned documents with matching IDs.
+fn build_owner_scoped_delete_filter(ids: &[String], owner_id: &str) -> Filter {
+    let point_ids: Vec<PointId> = ids.iter().map(|id| PointId::from(id.clone())).collect();
+    Filter::must([
+        Condition::has_id(point_ids),
+        Condition::matches(OWNER_ID_PAYLOAD_KEY, owner_id.to_string()),
+    ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qdrant_client::qdrant::{condition::ConditionOneOf, r#match::MatchValue};
+
+    #[test]
+    fn test_owner_filter_always_applied_without_metadata() {
+        let filter = build_owner_scoped_filter("user-123", None);
+        assert_eq!(filter.must.len(), 1);
+        assert!(contains_keyword_match(
+            &filter.must[0],
+            OWNER_ID_PAYLOAD_KEY,
+            "user-123"
+        ));
+    }
+
+    #[test]
+    fn test_owner_filter_combines_metadata_conditions() {
+        let mut metadata = HashMap::new();
+        metadata.insert("source".to_string(), JsonValue::String("docs".to_string()));
+
+        let filter = build_owner_scoped_filter("user-123", Some(&metadata));
+        assert_eq!(filter.must.len(), 2);
+        assert!(filter.must.iter().any(|cond| contains_keyword_match(
+            cond,
+            OWNER_ID_PAYLOAD_KEY,
+            "user-123"
+        )));
+        assert!(filter
+            .must
+            .iter()
+            .any(|cond| contains_keyword_match(cond, "source", "docs")));
+    }
+
+    #[test]
+    fn test_delete_filter_scopes_by_ids_and_owner() {
+        let ids = vec!["doc-1".to_string(), "doc-2".to_string()];
+        let filter = build_owner_scoped_delete_filter(&ids, "user-123");
+        assert_eq!(filter.must.len(), 2);
+        assert!(filter.must.iter().any(contains_has_id_condition));
+        assert!(filter.must.iter().any(|cond| contains_keyword_match(
+            cond,
+            OWNER_ID_PAYLOAD_KEY,
+            "user-123"
+        )));
+    }
+
+    #[test]
+    fn test_sanitized_metadata_cannot_override_reserved_keys() {
+        let mut payload: HashMap<String, qdrant_client::qdrant::Value> = HashMap::new();
+        let mut metadata: HashMap<String, JsonValue> = HashMap::new();
+
+        metadata.insert(
+            OWNER_ID_PAYLOAD_KEY.to_string(),
+            JsonValue::String("attacker".to_string()),
+        );
+        metadata.insert(
+            DOCUMENT_PAYLOAD_KEY.to_string(),
+            JsonValue::String("{\"text\":\"tampered\"}".to_string()),
+        );
+        metadata.insert("source".to_string(), JsonValue::String("docs".to_string()));
+
+        insert_sanitized_metadata(&mut payload, &metadata);
+
+        assert!(!payload.contains_key(OWNER_ID_PAYLOAD_KEY));
+        assert!(!payload.contains_key(DOCUMENT_PAYLOAD_KEY));
+        assert!(payload.contains_key("source"));
+    }
+
+    fn contains_has_id_condition(condition: &Condition) -> bool {
+        matches!(condition.condition_one_of, Some(ConditionOneOf::HasId(_)))
+    }
+
+    fn contains_keyword_match(condition: &Condition, key: &str, value: &str) -> bool {
+        match &condition.condition_one_of {
+            Some(ConditionOneOf::Field(field_condition)) if field_condition.key == key => {
+                match &field_condition.r#match {
+                    Some(matcher) => {
+                        matches!(&matcher.match_value, Some(MatchValue::Keyword(v)) if v == value)
+                    }
+                    None => false,
+                }
+            }
+            _ => false,
+        }
     }
 }
