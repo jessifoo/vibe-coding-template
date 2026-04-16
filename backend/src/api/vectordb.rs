@@ -15,7 +15,9 @@ use crate::models::{
 };
 use crate::services::llm::EmbeddingServiceFactory;
 use crate::services::supabase::SupabaseAuthService;
-use crate::services::vectordb::qdrant::{DocumentData, QdrantService};
+use crate::services::vectordb::qdrant::{DocumentData, QdrantService, OWNER_USER_ID_METADATA_KEY};
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 
 /// Create the vector database router.
 pub fn router() -> Router {
@@ -72,7 +74,7 @@ async fn add_documents(
     let metadata: Vec<_> = request
         .documents
         .iter()
-        .map(|d| d.metadata.clone())
+        .map(|d| with_owner_metadata(d.metadata.clone(), &user.id))
         .collect();
 
     // Add to vector database
@@ -120,13 +122,16 @@ async fn search_documents(
         .create_embedding(&query.query_text, &query.embedding_model)
         .await?;
 
+    // Enforce tenant isolation regardless of any user-provided filters.
+    let filter_metadata = build_owner_scoped_filter(query.filter_metadata.as_ref(), &user.id);
+
     // Search vector database
     let vector_db = QdrantService::new().await?;
     let results = vector_db
         .search(
             &embedding_response.embedding,
             query.limit,
-            query.filter_metadata.as_ref(),
+            Some(&filter_metadata),
         )
         .await?;
 
@@ -160,7 +165,7 @@ async fn delete_documents(
 
     // Delete from vector database
     let vector_db = QdrantService::new().await?;
-    let success = vector_db.delete(&request.document_ids).await?;
+    let success = vector_db.delete(&request.document_ids, &user.id).await?;
 
     if success {
         tracing::info!(
@@ -207,9 +212,84 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars()
-            .take(max_len)
-            .collect::<String>()
-            + "..."
+        s.chars().take(max_len).collect::<String>() + "..."
+    }
+}
+
+fn with_owner_metadata(
+    mut metadata: HashMap<String, JsonValue>,
+    user_id: &str,
+) -> HashMap<String, JsonValue> {
+    metadata.insert(
+        OWNER_USER_ID_METADATA_KEY.to_string(),
+        JsonValue::String(user_id.to_string()),
+    );
+    metadata
+}
+
+fn build_owner_scoped_filter(
+    filter_metadata: Option<&HashMap<String, JsonValue>>,
+    user_id: &str,
+) -> HashMap<String, JsonValue> {
+    let mut scoped_filters = filter_metadata.cloned().unwrap_or_default();
+    scoped_filters.insert(
+        OWNER_USER_ID_METADATA_KEY.to_string(),
+        JsonValue::String(user_id.to_string()),
+    );
+    scoped_filters
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_owner_scoped_filter, with_owner_metadata, OWNER_USER_ID_METADATA_KEY};
+    use serde_json::Value as JsonValue;
+    use std::collections::HashMap;
+
+    #[test]
+    fn with_owner_metadata_overrides_spoofed_owner() {
+        let mut input = HashMap::new();
+        input.insert(
+            OWNER_USER_ID_METADATA_KEY.to_string(),
+            JsonValue::String("attacker-id".to_string()),
+        );
+        input.insert(
+            "topic".to_string(),
+            JsonValue::String("security".to_string()),
+        );
+
+        let output = with_owner_metadata(input, "real-user-id");
+
+        assert_eq!(
+            output.get(OWNER_USER_ID_METADATA_KEY),
+            Some(&JsonValue::String("real-user-id".to_string()))
+        );
+        assert_eq!(
+            output.get("topic"),
+            Some(&JsonValue::String("security".to_string()))
+        );
+    }
+
+    #[test]
+    fn build_owner_scoped_filter_enforces_authenticated_user() {
+        let mut user_filters = HashMap::new();
+        user_filters.insert(
+            OWNER_USER_ID_METADATA_KEY.to_string(),
+            JsonValue::String("attacker-id".to_string()),
+        );
+        user_filters.insert(
+            "project".to_string(),
+            JsonValue::String("alpha".to_string()),
+        );
+
+        let scoped = build_owner_scoped_filter(Some(&user_filters), "auth-user-id");
+
+        assert_eq!(
+            scoped.get(OWNER_USER_ID_METADATA_KEY),
+            Some(&JsonValue::String("auth-user-id".to_string()))
+        );
+        assert_eq!(
+            scoped.get("project"),
+            Some(&JsonValue::String("alpha".to_string()))
+        );
     }
 }

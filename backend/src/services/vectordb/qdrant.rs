@@ -13,6 +13,9 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Metadata key storing the authenticated owner user ID.
+pub const OWNER_USER_ID_METADATA_KEY: &str = "owner_user_id";
+
 /// Service for interacting with Qdrant vector database.
 pub struct QdrantService {
     client: Qdrant,
@@ -299,18 +302,19 @@ impl QdrantService {
     /// # Arguments
     ///
     /// * `ids` - Document IDs to delete
+    /// * `owner_user_id` - Authenticated user ID owning the documents
     ///
     /// # Errors
     ///
     /// Returns an error if deletion fails.
-    pub async fn delete(&self, ids: &[String]) -> Result<bool, AppError> {
+    pub async fn delete(&self, ids: &[String], owner_user_id: &str) -> Result<bool, AppError> {
         if ids.is_empty() {
             return Ok(true);
         }
 
-        let points: Vec<PointId> = ids.iter().map(|id| PointId::from(id.clone())).collect();
-
-        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(points);
+        let owner_scoped_filter = build_owner_delete_filter(ids, owner_user_id);
+        let delete_request =
+            DeletePointsBuilder::new(&self.collection_name).points(owner_scoped_filter);
 
         self.client
             .delete_points(delete_request)
@@ -325,6 +329,13 @@ impl QdrantService {
 
         Ok(true)
     }
+}
+
+fn build_owner_delete_filter(ids: &[String], owner_user_id: &str) -> Filter {
+    let ids_condition = Condition::has_id(ids.iter().map(|id| PointId::from(id.clone())));
+    let owner_condition = Condition::matches(OWNER_USER_ID_METADATA_KEY, owner_user_id.to_string());
+
+    Filter::must([ids_condition, owner_condition])
 }
 
 /// Document data for storage.
@@ -342,5 +353,26 @@ fn extract_string_value(value: &qdrant_client::qdrant::Value) -> Option<String> 
     match &value.kind {
         Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => Some(s.clone()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_owner_delete_filter, OWNER_USER_ID_METADATA_KEY};
+
+    #[test]
+    fn build_owner_delete_filter_contains_owner_and_id_conditions() {
+        let ids = vec!["doc-1".to_string(), "doc-2".to_string()];
+        let filter = build_owner_delete_filter(&ids, "user-123");
+
+        assert_eq!(filter.must.len(), 2);
+        assert!(filter.should.is_empty());
+        assert!(filter.must_not.is_empty());
+
+        let filter_debug = format!("{filter:?}");
+        assert!(filter_debug.contains(OWNER_USER_ID_METADATA_KEY));
+        assert!(filter_debug.contains("doc-1"));
+        assert!(filter_debug.contains("doc-2"));
+        assert!(filter_debug.contains("user-123"));
     }
 }
