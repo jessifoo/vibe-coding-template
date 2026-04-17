@@ -8,6 +8,8 @@ use axum::{
     routing::post,
     Router,
 };
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 
 use crate::models::{
     AppError, DeleteDocumentsRequest, DocumentInput, DocumentUploadResponse, LlmProvider,
@@ -16,6 +18,8 @@ use crate::models::{
 use crate::services::llm::EmbeddingServiceFactory;
 use crate::services::supabase::SupabaseAuthService;
 use crate::services::vectordb::qdrant::{DocumentData, QdrantService};
+
+const OWNER_ID_METADATA_KEY: &str = "owner_id";
 
 /// Create the vector database router.
 pub fn router() -> Router {
@@ -72,7 +76,7 @@ async fn add_documents(
     let metadata: Vec<_> = request
         .documents
         .iter()
-        .map(|d| d.metadata.clone())
+        .map(|d| build_owner_scoped_metadata(&d.metadata, &user.id))
         .collect();
 
     // Add to vector database
@@ -121,12 +125,13 @@ async fn search_documents(
         .await?;
 
     // Search vector database
+    let filter_metadata = build_owner_scoped_filter(query.filter_metadata.as_ref(), &user.id);
     let vector_db = QdrantService::new().await?;
     let results = vector_db
         .search(
             &embedding_response.embedding,
             query.limit,
-            query.filter_metadata.as_ref(),
+            Some(&filter_metadata),
         )
         .await?;
 
@@ -160,7 +165,9 @@ async fn delete_documents(
 
     // Delete from vector database
     let vector_db = QdrantService::new().await?;
-    let success = vector_db.delete(&request.document_ids).await?;
+    let success = vector_db
+        .delete_for_owner(&request.document_ids, &user.id)
+        .await?;
 
     if success {
         tracing::info!(
@@ -207,9 +214,83 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars()
-            .take(max_len)
-            .collect::<String>()
-            + "..."
+        s.chars().take(max_len).collect::<String>() + "..."
+    }
+}
+
+fn build_owner_scoped_metadata(
+    metadata: &HashMap<String, JsonValue>,
+    owner_id: &str,
+) -> HashMap<String, JsonValue> {
+    let mut owner_scoped = metadata.clone();
+    owner_scoped.insert(
+        OWNER_ID_METADATA_KEY.to_string(),
+        JsonValue::String(owner_id.to_string()),
+    );
+    owner_scoped
+}
+
+fn build_owner_scoped_filter(
+    filter_metadata: Option<&HashMap<String, JsonValue>>,
+    owner_id: &str,
+) -> HashMap<String, JsonValue> {
+    let mut owner_scoped = filter_metadata.cloned().unwrap_or_default();
+    owner_scoped.insert(
+        OWNER_ID_METADATA_KEY.to_string(),
+        JsonValue::String(owner_id.to_string()),
+    );
+    owner_scoped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn owner_scoped_metadata_overrides_user_supplied_owner_id() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            OWNER_ID_METADATA_KEY.to_string(),
+            JsonValue::String("attacker".to_string()),
+        );
+        metadata.insert(
+            "topic".to_string(),
+            JsonValue::String("security".to_string()),
+        );
+
+        let scoped = build_owner_scoped_metadata(&metadata, "user-123");
+
+        assert_eq!(
+            scoped.get(OWNER_ID_METADATA_KEY),
+            Some(&JsonValue::String("user-123".to_string()))
+        );
+        assert_eq!(
+            scoped.get("topic"),
+            Some(&JsonValue::String("security".to_string()))
+        );
+    }
+
+    #[test]
+    fn owner_scoped_filter_enforces_authenticated_owner_id() {
+        let mut filter = HashMap::new();
+        filter.insert(
+            OWNER_ID_METADATA_KEY.to_string(),
+            JsonValue::String("attacker".to_string()),
+        );
+        filter.insert(
+            "category".to_string(),
+            JsonValue::String("invoices".to_string()),
+        );
+
+        let scoped = build_owner_scoped_filter(Some(&filter), "user-456");
+
+        assert_eq!(
+            scoped.get(OWNER_ID_METADATA_KEY),
+            Some(&JsonValue::String("user-456".to_string()))
+        );
+        assert_eq!(
+            scoped.get("category"),
+            Some(&JsonValue::String("invoices".to_string()))
+        );
     }
 }

@@ -299,18 +299,23 @@ impl QdrantService {
     /// # Arguments
     ///
     /// * `ids` - Document IDs to delete
+    /// * `owner_id` - Authenticated owner ID used to scope deletion
     ///
     /// # Errors
     ///
     /// Returns an error if deletion fails.
-    pub async fn delete(&self, ids: &[String]) -> Result<bool, AppError> {
+    pub async fn delete_for_owner(&self, ids: &[String], owner_id: &str) -> Result<bool, AppError> {
         if ids.is_empty() {
             return Ok(true);
         }
 
-        let points: Vec<PointId> = ids.iter().map(|id| PointId::from(id.clone())).collect();
+        let owner_scoped_filter = Filter::must([
+            Condition::has_id(ids.iter().cloned()),
+            Condition::matches("owner_id", owner_id.to_string()),
+        ]);
 
-        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(points);
+        let delete_request =
+            DeletePointsBuilder::new(&self.collection_name).points(owner_scoped_filter);
 
         self.client
             .delete_points(delete_request)
@@ -319,6 +324,7 @@ impl QdrantService {
 
         tracing::info!(
             collection = %self.collection_name,
+            owner_id = %owner_id,
             count = ids.len(),
             "Deleted documents from Qdrant"
         );
