@@ -13,6 +13,8 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+const OWNER_ID_FIELD: &str = "owner_id";
+
 /// Service for interacting with Qdrant vector database.
 pub struct QdrantService {
     client: Qdrant,
@@ -103,6 +105,7 @@ impl QdrantService {
     ///
     /// * `documents` - Documents with text and optional title
     /// * `embeddings` - Embedding vectors for each document
+    /// * `owner_id` - Authenticated user ID used for tenant isolation
     /// * `metadata` - Optional metadata for each document
     ///
     /// # Returns
@@ -116,6 +119,7 @@ impl QdrantService {
         &self,
         documents: &[DocumentData],
         embeddings: &[Vec<f32>],
+        owner_id: &str,
         metadata: Option<&[HashMap<String, JsonValue>]>,
     ) -> Result<Vec<String>, AppError> {
         if documents.len() != embeddings.len() {
@@ -172,6 +176,12 @@ impl QdrantService {
                     }
                 }
 
+                // Always stamp owner_id last so user-provided metadata cannot override it.
+                payload.insert(
+                    OWNER_ID_FIELD.to_string(),
+                    qdrant_client::qdrant::Value::from(owner_id.to_string()),
+                );
+
                 PointStruct::new(id.clone(), embedding.clone(), payload)
             })
             .collect();
@@ -195,6 +205,7 @@ impl QdrantService {
     /// # Arguments
     ///
     /// * `query_embedding` - Embedding vector of the query
+    /// * `owner_id` - Authenticated user ID used for tenant isolation
     /// * `limit` - Maximum number of results to return
     /// * `filter_params` - Optional metadata filters
     ///
@@ -204,6 +215,7 @@ impl QdrantService {
     pub async fn search(
         &self,
         query_embedding: &[f32],
+        owner_id: &str,
         limit: u32,
         filter_params: Option<&HashMap<String, JsonValue>>,
     ) -> Result<Vec<SearchResult>, AppError> {
@@ -211,20 +223,8 @@ impl QdrantService {
         self.ensure_collection_exists(query_embedding.len() as u64)
             .await?;
 
-        // Build filter if provided
-        let filter = filter_params.map(|params| {
-            let conditions: Vec<Condition> = params
-                .iter()
-                .map(|(key, value)| {
-                    Condition::matches(
-                        key.as_str(),
-                        value.to_string().trim_matches('"').to_string(),
-                    )
-                })
-                .collect();
-
-            Filter::must(conditions)
-        });
+        // Always enforce owner scoping to prevent cross-tenant reads.
+        let filter = build_search_filter(owner_id, filter_params);
 
         let mut search_builder = SearchPointsBuilder::new(
             &self.collection_name,
@@ -233,9 +233,7 @@ impl QdrantService {
         )
         .with_payload(true);
 
-        if let Some(f) = filter {
-            search_builder = search_builder.filter(f);
-        }
+        search_builder = search_builder.filter(filter);
 
         let search_result = self
             .client
@@ -299,18 +297,19 @@ impl QdrantService {
     /// # Arguments
     ///
     /// * `ids` - Document IDs to delete
+    /// * `owner_id` - Authenticated user ID used for tenant isolation
     ///
     /// # Errors
     ///
     /// Returns an error if deletion fails.
-    pub async fn delete(&self, ids: &[String]) -> Result<bool, AppError> {
+    pub async fn delete(&self, ids: &[String], owner_id: &str) -> Result<bool, AppError> {
         if ids.is_empty() {
             return Ok(true);
         }
 
-        let points: Vec<PointId> = ids.iter().map(|id| PointId::from(id.clone())).collect();
-
-        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(points);
+        // Restrict deletes to the caller's own documents only.
+        let delete_filter = build_delete_filter(owner_id, ids);
+        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(delete_filter);
 
         self.client
             .delete_points(delete_request)
@@ -342,5 +341,108 @@ fn extract_string_value(value: &qdrant_client::qdrant::Value) -> Option<String> 
     match &value.kind {
         Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => Some(s.clone()),
         _ => None,
+    }
+}
+
+fn build_owner_condition(owner_id: &str) -> Condition {
+    Condition::matches(OWNER_ID_FIELD, owner_id.to_string())
+}
+
+fn build_search_filter(
+    owner_id: &str,
+    filter_params: Option<&HashMap<String, JsonValue>>,
+) -> Filter {
+    let mut conditions: Vec<Condition> = vec![build_owner_condition(owner_id)];
+
+    if let Some(params) = filter_params {
+        conditions.extend(params.iter().map(|(key, value)| {
+            Condition::matches(
+                key.as_str(),
+                value.to_string().trim_matches('"').to_string(),
+            )
+        }));
+    }
+
+    Filter::must(conditions)
+}
+
+fn build_delete_filter(owner_id: &str, ids: &[String]) -> Filter {
+    Filter::must([
+        build_owner_condition(owner_id),
+        Condition::has_id(ids.iter().cloned()),
+    ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qdrant_client::qdrant::{condition::ConditionOneOf, r#match::MatchValue};
+
+    #[test]
+    fn search_filter_always_includes_owner_condition() {
+        let filter = build_search_filter("user_123", None);
+
+        assert_eq!(filter.must.len(), 1);
+        assert!(filter
+            .must
+            .iter()
+            .any(|condition| is_owner_condition(condition, "user_123")));
+    }
+
+    #[test]
+    fn search_filter_merges_owner_and_request_filters() {
+        let mut params = HashMap::new();
+        params.insert("source".to_string(), JsonValue::String("kb".to_string()));
+
+        let filter = build_search_filter("user_123", Some(&params));
+
+        assert_eq!(filter.must.len(), 2);
+        assert!(filter
+            .must
+            .iter()
+            .any(|condition| is_owner_condition(condition, "user_123")));
+        assert!(filter
+            .must
+            .iter()
+            .any(|condition| match &condition.condition_one_of {
+                Some(ConditionOneOf::Field(field)) => field.key == "source",
+                _ => false,
+            }));
+    }
+
+    #[test]
+    fn delete_filter_requires_ids_and_owner() {
+        let ids = vec!["doc-1".to_string(), "doc-2".to_string()];
+        let filter = build_delete_filter("user_123", &ids);
+
+        assert_eq!(filter.must.len(), 2);
+        assert!(filter
+            .must
+            .iter()
+            .any(|condition| is_owner_condition(condition, "user_123")));
+        assert!(filter.must.iter().any(|condition| {
+            matches!(condition.condition_one_of, Some(ConditionOneOf::HasId(_)))
+        }));
+    }
+
+    fn is_owner_condition(condition: &Condition, expected_owner: &str) -> bool {
+        match &condition.condition_one_of {
+            Some(ConditionOneOf::Field(field)) => {
+                if field.key != OWNER_ID_FIELD {
+                    return false;
+                }
+
+                match &field.r#match {
+                    Some(r#match) => match &r#match.match_value {
+                        Some(MatchValue::Keyword(value)) | Some(MatchValue::Text(value)) => {
+                            value == expected_owner
+                        }
+                        _ => false,
+                    },
+                    None => false,
+                }
+            }
+            _ => false,
+        }
     }
 }
