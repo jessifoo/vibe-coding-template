@@ -76,7 +76,7 @@ async fn add_documents(
         .collect();
 
     // Add to vector database
-    let vector_db = QdrantService::new().await?;
+    let vector_db = QdrantService::for_user(&user.id).await?;
     let document_ids = vector_db
         .add_documents(&documents, &embeddings, Some(&metadata))
         .await?;
@@ -121,7 +121,7 @@ async fn search_documents(
         .await?;
 
     // Search vector database
-    let vector_db = QdrantService::new().await?;
+    let vector_db = QdrantService::for_user(&user.id).await?;
     let results = vector_db
         .search(
             &embedding_response.embedding,
@@ -159,7 +159,7 @@ async fn delete_documents(
     );
 
     // Delete from vector database
-    let vector_db = QdrantService::new().await?;
+    let vector_db = QdrantService::for_user(&user.id).await?;
     let success = vector_db.delete(&request.document_ids).await?;
 
     if success {
@@ -207,9 +207,6 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars()
-            .take(max_len)
-            .collect::<String>()
-            + "..."
+        s.chars().take(max_len).collect::<String>() + "..."
     }
 }

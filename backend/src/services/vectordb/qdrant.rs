@@ -19,6 +19,8 @@ pub struct QdrantService {
     collection_name: String,
 }
 
+const MAX_COLLECTION_NAME_LEN: usize = 255;
+
 impl QdrantService {
     /// Create a new Qdrant service instance.
     ///
@@ -28,8 +30,28 @@ impl QdrantService {
     ///
     /// Returns an error if connection to Qdrant fails.
     pub async fn new() -> Result<Self, AppError> {
-        let collection_name = SETTINGS.qdrant.collection_name.clone();
+        Self::new_with_collection_name(SETTINGS.qdrant.collection_name.clone())
+    }
 
+    /// Create a user-scoped Qdrant service instance.
+    ///
+    /// This isolates each user's vectors into a dedicated collection and
+    /// prevents cross-user reads/deletes.
+    ///
+    /// # Arguments
+    ///
+    /// * `user_id` - Authenticated user identifier used for collection scoping
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if connection to Qdrant fails.
+    pub async fn for_user(user_id: &str) -> Result<Self, AppError> {
+        let scoped_collection =
+            user_scoped_collection_name(&SETTINGS.qdrant.collection_name, user_id);
+        Self::new_with_collection_name(scoped_collection)
+    }
+
+    fn new_with_collection_name(collection_name: String) -> Result<Self, AppError> {
         let client = if let Some(url) = &SETTINGS.qdrant.url {
             let mut builder = Qdrant::from_url(url);
 
@@ -342,5 +364,70 @@ fn extract_string_value(value: &qdrant_client::qdrant::Value) -> Option<String> 
     match &value.kind {
         Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => Some(s.clone()),
         _ => None,
+    }
+}
+
+fn sanitize_collection_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn user_scoped_collection_name(base_collection: &str, user_id: &str) -> String {
+    let sanitized_base = sanitize_collection_component(base_collection);
+    let sanitized_user = sanitize_collection_component(user_id);
+
+    let truncated_user: String = sanitized_user
+        .chars()
+        .take(MAX_COLLECTION_NAME_LEN.saturating_sub(1))
+        .collect();
+
+    if truncated_user.is_empty() {
+        return sanitized_base
+            .chars()
+            .take(MAX_COLLECTION_NAME_LEN)
+            .collect();
+    }
+
+    let max_base_len = MAX_COLLECTION_NAME_LEN.saturating_sub(truncated_user.len() + 1);
+    let truncated_base: String = sanitized_base.chars().take(max_base_len).collect();
+
+    if truncated_base.is_empty() {
+        truncated_user
+    } else {
+        format!("{truncated_base}_{truncated_user}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{user_scoped_collection_name, MAX_COLLECTION_NAME_LEN};
+
+    #[test]
+    fn user_scoped_collection_name_appends_user_identifier() {
+        let collection_name = user_scoped_collection_name("documents", "user-123");
+        assert_eq!(collection_name, "documents_user-123");
+    }
+
+    #[test]
+    fn user_scoped_collection_name_sanitizes_invalid_characters() {
+        let collection_name = user_scoped_collection_name("team docs", "alice@example.com");
+        assert_eq!(collection_name, "team_docs_alice_example_com");
+    }
+
+    #[test]
+    fn user_scoped_collection_name_respects_max_length() {
+        let base = "b".repeat(200);
+        let user = "u".repeat(200);
+
+        let collection_name = user_scoped_collection_name(&base, &user);
+        assert!(collection_name.len() <= MAX_COLLECTION_NAME_LEN);
     }
 }
