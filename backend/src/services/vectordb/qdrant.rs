@@ -13,6 +13,8 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+const OWNER_USER_ID_FIELD: &str = "owner_user_id";
+
 /// Service for interacting with Qdrant vector database.
 pub struct QdrantService {
     client: Qdrant,
@@ -104,6 +106,7 @@ impl QdrantService {
     /// * `documents` - Documents with text and optional title
     /// * `embeddings` - Embedding vectors for each document
     /// * `metadata` - Optional metadata for each document
+    /// * `owner_user_id` - Authenticated owner ID used for row-level isolation
     ///
     /// # Returns
     ///
@@ -117,6 +120,7 @@ impl QdrantService {
         documents: &[DocumentData],
         embeddings: &[Vec<f32>],
         metadata: Option<&[HashMap<String, JsonValue>]>,
+        owner_user_id: &str,
     ) -> Result<Vec<String>, AppError> {
         if documents.len() != embeddings.len() {
             return Err(AppError::BadRequest(format!(
@@ -172,6 +176,12 @@ impl QdrantService {
                     }
                 }
 
+                // Always persist owner scope from authenticated user.
+                payload.insert(
+                    OWNER_USER_ID_FIELD.to_string(),
+                    qdrant_client::qdrant::Value::from(owner_user_id.to_string()),
+                );
+
                 PointStruct::new(id.clone(), embedding.clone(), payload)
             })
             .collect();
@@ -197,6 +207,7 @@ impl QdrantService {
     /// * `query_embedding` - Embedding vector of the query
     /// * `limit` - Maximum number of results to return
     /// * `filter_params` - Optional metadata filters
+    /// * `owner_user_id` - Authenticated owner ID used for row-level isolation
     ///
     /// # Errors
     ///
@@ -206,36 +217,22 @@ impl QdrantService {
         query_embedding: &[f32],
         limit: u32,
         filter_params: Option<&HashMap<String, JsonValue>>,
+        owner_user_id: &str,
     ) -> Result<Vec<SearchResult>, AppError> {
         // Ensure collection exists
         self.ensure_collection_exists(query_embedding.len() as u64)
             .await?;
 
-        // Build filter if provided
-        let filter = filter_params.map(|params| {
-            let conditions: Vec<Condition> = params
-                .iter()
-                .map(|(key, value)| {
-                    Condition::matches(
-                        key.as_str(),
-                        value.to_string().trim_matches('"').to_string(),
-                    )
-                })
-                .collect();
+        // Always include owner scope to prevent cross-user reads.
+        let filter = build_search_filter(filter_params, owner_user_id);
 
-            Filter::must(conditions)
-        });
-
-        let mut search_builder = SearchPointsBuilder::new(
+        let search_builder = SearchPointsBuilder::new(
             &self.collection_name,
             query_embedding.to_vec(),
             limit as u64,
         )
-        .with_payload(true);
-
-        if let Some(f) = filter {
-            search_builder = search_builder.filter(f);
-        }
+        .with_payload(true)
+        .filter(filter);
 
         let search_result = self
             .client
@@ -277,8 +274,10 @@ impl QdrantService {
                                 document.title = doc_map.get("title").cloned();
                             }
                         }
-                    } else if let Some(s) = extract_string_value(&value) {
-                        metadata.insert(key, JsonValue::String(s));
+                    } else if key != OWNER_USER_ID_FIELD {
+                        if let Some(s) = extract_string_value(&value) {
+                            metadata.insert(key, JsonValue::String(s));
+                        }
                     }
                 }
 
@@ -299,18 +298,18 @@ impl QdrantService {
     /// # Arguments
     ///
     /// * `ids` - Document IDs to delete
+    /// * `owner_user_id` - Authenticated owner ID used for row-level isolation
     ///
     /// # Errors
     ///
     /// Returns an error if deletion fails.
-    pub async fn delete(&self, ids: &[String]) -> Result<bool, AppError> {
+    pub async fn delete(&self, ids: &[String], owner_user_id: &str) -> Result<bool, AppError> {
         if ids.is_empty() {
             return Ok(true);
         }
 
-        let points: Vec<PointId> = ids.iter().map(|id| PointId::from(id.clone())).collect();
-
-        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(points);
+        let filter = build_delete_filter(ids, owner_user_id);
+        let delete_request = DeletePointsBuilder::new(&self.collection_name).points(filter);
 
         self.client
             .delete_points(delete_request)
@@ -342,5 +341,65 @@ fn extract_string_value(value: &qdrant_client::qdrant::Value) -> Option<String> 
     match &value.kind {
         Some(qdrant_client::qdrant::value::Kind::StringValue(s)) => Some(s.clone()),
         _ => None,
+    }
+}
+
+fn build_search_filter(
+    filter_params: Option<&HashMap<String, JsonValue>>,
+    owner_user_id: &str,
+) -> Filter {
+    let mut conditions = vec![Condition::matches(
+        OWNER_USER_ID_FIELD,
+        owner_user_id.to_string(),
+    )];
+
+    if let Some(params) = filter_params {
+        conditions.extend(params.iter().map(|(key, value)| {
+            Condition::matches(
+                key.as_str(),
+                value.to_string().trim_matches('"').to_string(),
+            )
+        }));
+    }
+
+    Filter::must(conditions)
+}
+
+fn build_delete_filter(ids: &[String], owner_user_id: &str) -> Filter {
+    Filter::must(vec![
+        Condition::has_id(ids.iter().cloned()),
+        Condition::matches(OWNER_USER_ID_FIELD, owner_user_id.to_string()),
+    ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_build_search_filter_includes_owner_scope() {
+        let mut metadata = HashMap::new();
+        metadata.insert("category".to_string(), json!("docs"));
+
+        let filter = build_search_filter(Some(&metadata), "user-123");
+        let debug = format!("{filter:?}");
+
+        assert!(debug.contains("owner_user_id"));
+        assert!(debug.contains("user-123"));
+        assert!(debug.contains("category"));
+        assert!(debug.contains("docs"));
+    }
+
+    #[test]
+    fn test_build_delete_filter_scopes_ids_to_owner() {
+        let ids = vec!["id-a".to_string(), "id-b".to_string()];
+        let filter = build_delete_filter(&ids, "user-456");
+        let debug = format!("{filter:?}");
+
+        assert!(debug.contains("owner_user_id"));
+        assert!(debug.contains("user-456"));
+        assert!(debug.contains("id-a"));
+        assert!(debug.contains("id-b"));
     }
 }
