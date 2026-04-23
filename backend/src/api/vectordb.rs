@@ -8,11 +8,13 @@ use axum::{
     routing::post,
     Router,
 };
+use serde_json::Value as JsonValue;
+use std::collections::HashMap;
 
 use crate::api::state::AppState;
 use crate::http_auth::bearer_token_from_headers;
 use crate::models::{
-    AppError, DeleteDocumentsRequest, DocumentInput, DocumentUploadResponse, LlmProvider,
+    AppError, DeleteDocumentsRequest, Document, DocumentInput, DocumentUploadResponse, LlmProvider,
     SearchQuery, SearchResult,
 };
 use crate::services::llm::EmbeddingServiceFactory;
@@ -72,11 +74,7 @@ async fn add_documents(
         .collect();
 
     // Prepare metadata
-    let metadata: Vec<_> = request
-        .documents
-        .iter()
-        .map(|d| d.metadata.clone())
-        .collect();
+    let metadata = user_scoped_metadata(&request.documents, &user.id);
 
     // Add to vector database
     let vector_db = &*state.qdrant;
@@ -126,11 +124,12 @@ async fn search_documents(
 
     // Search vector database
     let vector_db = &*state.qdrant;
+    let scoped_filter = user_scoped_filter(query.filter_metadata.as_ref(), &user.id);
     let results = vector_db
         .search(
             &embedding_response.embedding,
             query.limit,
-            query.filter_metadata.as_ref(),
+            Some(&scoped_filter),
         )
         .await?;
 
@@ -165,7 +164,9 @@ async fn delete_documents(
 
     // Delete from vector database
     let vector_db = &*state.qdrant;
-    let success = vector_db.delete(&request.document_ids).await?;
+    let success = vector_db
+        .delete_for_user(&request.document_ids, &user.id)
+        .await?;
 
     if success {
         tracing::info!(
@@ -195,5 +196,66 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
         s.chars().take(max_len).collect::<String>() + "..."
+    }
+}
+
+fn user_scoped_metadata(documents: &[Document], user_id: &str) -> Vec<HashMap<String, JsonValue>> {
+    documents
+        .iter()
+        .map(|document| {
+            let mut metadata = document.metadata.clone();
+            metadata.insert(
+                "user_id".to_string(),
+                JsonValue::String(user_id.to_string()),
+            );
+            metadata
+        })
+        .collect()
+}
+
+fn user_scoped_filter(
+    filter_metadata: Option<&HashMap<String, JsonValue>>,
+    user_id: &str,
+) -> HashMap<String, JsonValue> {
+    let mut scoped_filter = filter_metadata.cloned().unwrap_or_default();
+    scoped_filter.insert(
+        "user_id".to_string(),
+        JsonValue::String(user_id.to_string()),
+    );
+    scoped_filter
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn user_scoped_filter_overrides_client_user_id() {
+        let mut client_filter = HashMap::new();
+        client_filter.insert("topic".to_string(), json!("billing"));
+        client_filter.insert("user_id".to_string(), json!("attacker"));
+
+        let scoped = user_scoped_filter(Some(&client_filter), "real-user");
+
+        assert_eq!(scoped.get("topic"), Some(&json!("billing")));
+        assert_eq!(scoped.get("user_id"), Some(&json!("real-user")));
+    }
+
+    #[test]
+    fn user_scoped_metadata_injects_owner_id() {
+        let mut metadata = HashMap::new();
+        metadata.insert("team".to_string(), json!("search"));
+
+        let documents = vec![Document {
+            text: "internal notes".to_string(),
+            title: Some("ops".to_string()),
+            metadata,
+        }];
+
+        let scoped = user_scoped_metadata(&documents, "user-123");
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].get("team"), Some(&json!("search")));
+        assert_eq!(scoped[0].get("user_id"), Some(&json!("user-123")));
     }
 }

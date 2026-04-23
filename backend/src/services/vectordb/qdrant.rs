@@ -164,10 +164,7 @@ impl QdrantService {
                 if let Some(meta_list) = metadata {
                     if let Some(meta) = meta_list.get(i) {
                         for (key, value) in meta {
-                            payload.insert(
-                                key.clone(),
-                                qdrant_client::qdrant::Value::from(value.to_string()),
-                            );
+                            payload.insert(key.clone(), value.clone().into());
                         }
                     }
                 }
@@ -321,6 +318,46 @@ impl QdrantService {
             collection = %self.collection_name,
             count = ids.len(),
             "Deleted documents from Qdrant"
+        );
+
+        Ok(true)
+    }
+
+    /// Delete documents by ID, scoped to a specific user.
+    ///
+    /// Only points that both belong to `user_id` and match one of the provided
+    /// IDs are deleted.
+    ///
+    /// # Arguments
+    ///
+    /// * `ids` - Candidate document IDs to delete
+    /// * `user_id` - Authenticated owner ID
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if deletion fails.
+    pub async fn delete_for_user(&self, ids: &[String], user_id: &str) -> Result<bool, AppError> {
+        if ids.is_empty() {
+            return Ok(true);
+        }
+
+        let scoped_delete_filter = Filter::must([
+            Condition::has_id(ids.iter().map(String::as_str)),
+            Condition::matches("user_id", user_id.to_string()),
+        ]);
+
+        self.client
+            .delete_points(
+                DeletePointsBuilder::new(&self.collection_name).points(scoped_delete_filter),
+            )
+            .await
+            .map_err(|e| AppError::ExternalService(format!("Failed to delete documents: {e}")))?;
+
+        tracing::info!(
+            collection = %self.collection_name,
+            user_id = %user_id,
+            count = ids.len(),
+            "Deleted user-scoped documents from Qdrant"
         );
 
         Ok(true)
