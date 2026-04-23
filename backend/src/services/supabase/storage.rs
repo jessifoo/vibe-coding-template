@@ -6,6 +6,7 @@ use crate::config::SETTINGS;
 use crate::models::AppError;
 use reqwest::Client;
 use serde::Deserialize;
+use std::path::Path;
 use uuid::Uuid;
 
 /// Service for interacting with Supabase Storage.
@@ -121,9 +122,20 @@ impl SupabaseStorageService {
         content_type: &str,
         path: Option<&str>,
     ) -> Result<String, AppError> {
-        // Generate unique filename
-        let unique_filename = format!("{}-{filename}", Uuid::new_v4());
+        let safe_name = Path::new(filename)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| {
+                AppError::BadRequest("Invalid or empty filename (path segments not allowed)".to_string())
+            })?;
+        // Generate unique object key (no user-controlled path segments in the basename)
+        let unique_filename = format!("{}-{}", Uuid::new_v4(), safe_name);
         let full_path = match path {
+            Some(p) if p.contains("..") || p.starts_with('/') => {
+                return Err(AppError::BadRequest(
+                    "Storage path must be relative and cannot contain '..'".to_string(),
+                ));
+            }
             Some(p) => format!("{p}/{unique_filename}"),
             None => unique_filename,
         };

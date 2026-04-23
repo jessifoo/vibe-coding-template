@@ -47,7 +47,7 @@ make dev-backend   # Backend only
 - Edit Rust files in `backend/src/`
 - `cargo watch` auto-rebuilds on file changes
 - Check logs: `docker-compose logs -f backend`
-- Run checks: `cd backend && cargo check && cargo clippy`
+- Run checks: `cd backend && cargo check && cargo clippy -- -D warnings`
 
 #### Frontend Changes
 - Edit TypeScript/React files in `frontend/`
@@ -71,9 +71,9 @@ make db-status
 ### Testing Changes
 
 #### API Testing
-- Visit http://localhost:8000/docs for interactive API documentation
-- Use the built-in FastAPI test interface
-- Test authentication endpoints with proper tokens
+- Use tools like `curl`, [Postman](https://www.postman.com/), or [httpie](https://httpie.io/) to exercise endpoints
+- Visit http://localhost:8000/ to confirm the server is up (returns JSON health)
+- Test authentication endpoints with real Bearer tokens
 
 #### Frontend Testing
 - Visit http://localhost:3000 for the application
@@ -83,8 +83,8 @@ make db-status
 ### Code Quality
 
 #### Backend Code Quality (Rust)
-- Follow Axum standards from `.cursor/rules/backend/fastapi-standards.mdc` (Rust/Axum backend standards)
-- Run `cargo clippy` - no warnings allowed
+- Follow Axum standards from `.cursor/rules/backend/axum-standards.mdc`
+- Run `cargo clippy -- -D warnings` — warnings fail CI
 - Run `cargo fmt` before committing
 - Use `Result<T, AppError>` for all fallible operations
 - No `.unwrap()` or `.expect()` (except in tests)
@@ -223,7 +223,7 @@ git commit -m "docs(readme): update setup instructions"
 
 #### Rust Backend
 - [ ] `cargo check` passes
-- [ ] `cargo clippy` passes (no warnings)
+- [ ] `cargo clippy -- -D warnings` passes
 - [ ] `cargo fmt` has been run
 - [ ] `cargo test` passes
 - [ ] No `.unwrap()` or `.expect()` (except tests)

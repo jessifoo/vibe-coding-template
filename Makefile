@@ -1,6 +1,6 @@
 .PHONY: dev dev-frontend dev-backend prod prod-frontend prod-backend clean help
 .PHONY: db-migration-new db-apply db-list db-push db-status
-.PHONY: install-frontend build-frontend install-backend build-backend test-backend lint-backend check-backend fmt-backend ci
+.PHONY: install-frontend build-frontend install-backend build-backend test-backend lint-backend check-backend fmt-backend ci ci-full lint-frontend test-frontend
 
 # Default target
 .DEFAULT_GOAL := help
@@ -53,6 +53,7 @@ build-frontend: ## Build frontend for production
 	cd frontend && npm run build
 
 # Backend helpers (Rust)
+# Installs globally to ~/.cargo/bin (standard for Rust CLI tools). Ensure that directory is on PATH.
 install-backend: ## Install backend development tools
 	@echo "${GREEN}Installing backend development tools...${NC}"
 	cd backend && cargo install cargo-watch cargo-audit
@@ -76,6 +77,14 @@ check-backend: ## Check backend compiles
 fmt-backend: ## Format backend code
 	@echo "${GREEN}Formatting backend code...${NC}"
 	cd backend && cargo fmt
+
+lint-frontend: ## Run frontend ESLint
+	@echo "${GREEN}Linting frontend...${NC}"
+	cd frontend && npm run lint
+
+test-frontend: ## Run frontend typecheck (Next.js build includes typecheck)
+	@echo "${GREEN}Typechecking/building frontend...${NC}"
+	cd frontend && npm run build
 
 # Supabase database migrations (all for remote database)
 db-migration-new: ## Create a new migration file (Usage: make db-migration-new name=create_users_table)
@@ -104,8 +113,12 @@ db-status: ## Show pending migrations status
 	@ls -1 supabase/migrations/*.sql 2>/dev/null | sed 's/.*\//  /' || echo "  None"
 
 # CI helpers
-ci: lint-backend test-backend ## Run all CI checks
-	@echo "${GREEN}All CI checks passed!${NC}"
+# `ci` runs backend checks only (fast path for API work). Use `ci-full` for full stack.
+ci: lint-backend test-backend ## Run backend CI (lint + test)
+	@echo "${GREEN}Backend CI checks passed!${NC}"
+
+ci-full: lint-backend test-backend lint-frontend test-frontend ## Run full-stack CI
+	@echo "${GREEN}Full CI checks passed!${NC}"
 
 # Help command
 help: ## Show this help

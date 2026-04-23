@@ -209,7 +209,12 @@ impl SupabaseStorageService {
         content: Vec<u8>,
         content_type: &str,
     ) -> Result<String, AppError> {
-        let unique_filename = format!("{}-{}", uuid::Uuid::new_v4(), filename);
+        use std::path::Path;
+        let safe_name = Path::new(filename)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| AppError::BadRequest("Invalid filename".to_string()))?;
+        let unique_filename = format!("{}-{}", uuid::Uuid::new_v4(), safe_name);
         let url = format!(
             "{}/object/{}/{}",
             self.base_url, self.bucket_name, unique_filename
@@ -225,7 +230,11 @@ impl SupabaseStorageService {
             .await?;
         
         if !response.status().is_success() {
-            return Err(AppError::ExternalService("Upload failed".to_string()));
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(format!(
+                "Upload failed (status {status}): {body}"
+            )));
         }
         
         Ok(self.get_public_url(&unique_filename))
@@ -307,7 +316,7 @@ impl From<SupabaseUser> for UserProfile {
 
 1. **Always validate tokens** before processing requests
 2. **Use service key** for backend operations (not anon key)
-3. **Log authentication events** with user context
+3. **Log authentication events** with **non-PII** context only: internal user id, request id, and outcome. **Do not** log email addresses, raw tokens, `Authorization` headers, session ids, or service keys (also applies to error paths and structured logs sent to third parties)
 4. **Handle all error cases** explicitly
 5. **Use RLS policies** in database for additional security
 6. **Never expose service key** in responses or logs

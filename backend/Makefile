@@ -60,7 +60,7 @@ setup: ## Install development tools
 	cargo install cargo-edit
 
 # All checks (for CI)
-ci: fmt-check lint test ## Run all CI checks
+ci: fmt-check lint test audit ## Run all CI checks (incl. dependency audit)
 	@echo "${GREEN}All CI checks passed!${NC}"
 
 help: ## Show this help

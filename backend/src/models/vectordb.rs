@@ -4,13 +4,21 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use validator::Validate;
+use validator::{Validate, ValidationError};
+
+/// Reject empty or whitespace-only text (stricter than `length(min = 1)`).
+fn validate_trim_non_empty(s: &str) -> Result<(), ValidationError> {
+    if s.trim().is_empty() {
+        return Err(ValidationError::new("trim_non_empty"));
+    }
+    Ok(())
+}
 
 /// A document to be stored in the vector database.
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct Document {
     /// Document text content
-    #[validate(length(min = 1, message = "Document text cannot be empty"))]
+    #[validate(custom(function = "validate_trim_non_empty", message = "Document text cannot be empty or whitespace only"))]
     pub text: String,
 
     /// Optional document title
@@ -50,7 +58,7 @@ pub struct DocumentUploadResponse {
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct SearchQuery {
     /// Text to search for
-    #[validate(length(min = 1, message = "Query text cannot be empty"))]
+    #[validate(custom(function = "validate_trim_non_empty", message = "Query text cannot be empty or whitespace only"))]
     pub query_text: String,
 
     /// Embedding model to use
@@ -125,6 +133,13 @@ mod tests {
             metadata: HashMap::new(),
         };
         assert!(invalid_doc.validate().is_err());
+
+        let whitespace_doc = Document {
+            text: "   \t  ".to_string(),
+            title: None,
+            metadata: HashMap::new(),
+        };
+        assert!(whitespace_doc.validate().is_err());
     }
 
     #[test]

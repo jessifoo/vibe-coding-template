@@ -1,7 +1,9 @@
 //! API request and response models.
 //!
-//! All models use serde for serialization and validator for validation.
-//! The Rust type system ensures these models are always valid at compile time.
+//! All models use serde for serialization and the `validator` crate for
+//! runtime checks at API boundaries. Strong types catch many mistakes at
+//! compile time; rules like string length and formats are still enforced when
+//! requests are validated.
 
 pub mod auth;
 pub mod error;
@@ -12,7 +14,7 @@ pub mod vectordb;
 pub use auth::{ProviderTokenRequest, SupabaseUser, TokenResponse, UserMetadata, UserProfile};
 
 // Explicit re-exports from error module
-pub use error::{ApiErrorResponse, AppError};
+pub use error::{ApiErrorResponse, AppError, AppRunError};
 
 // Explicit re-exports from llm module
 pub use llm::{

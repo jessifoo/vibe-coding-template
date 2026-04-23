@@ -137,7 +137,7 @@ Before considering any code complete:
 - [ ] `cargo check` passes with no errors
 - [ ] `cargo clippy` passes with no warnings
 - [ ] `cargo fmt` has been run
-- [ ] All functions have doc comments
+- [ ] All public functions have doc comments
 - [ ] All public types have doc comments
 - [ ] No `.unwrap()` or `.expect()` outside of tests
 - [ ] All errors are properly typed and handled

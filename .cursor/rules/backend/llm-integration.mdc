@@ -35,6 +35,7 @@ pub struct OpenAiService {
 impl OpenAiService {
     pub fn new(api_key: String) -> Result<Self, AppError> {
         let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| AppError::Configuration(e.to_string()))?;
         Ok(Self { client, api_key })
@@ -90,9 +91,21 @@ impl LlmService for OpenAiService {
 
 ### Anthropic
 ```rust
+use std::time::Duration;
+
 pub struct AnthropicService {
     client: Client,
     api_key: String,
+}
+
+impl AnthropicService {
+    pub fn new(api_key: String) -> Result<Self, AppError> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .map_err(|e| AppError::Configuration(e.to_string()))?;
+        Ok(Self { client, api_key })
+    }
 }
 
 #[async_trait]

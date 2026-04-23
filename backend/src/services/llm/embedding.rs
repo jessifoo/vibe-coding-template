@@ -81,6 +81,7 @@ impl EmbeddingService for OpenAiEmbeddingService {
         #[derive(Deserialize)]
         struct EmbeddingUsage {
             prompt_tokens: u32,
+            #[allow(dead_code)]
             total_tokens: u32,
         }
 
@@ -122,43 +123,6 @@ impl EmbeddingService for OpenAiEmbeddingService {
             model: model.to_string(),
             usage: LlmUsage::embedding(openai_response.usage.prompt_tokens),
         })
-    }
-}
-
-/// Anthropic embedding service (placeholder - Anthropic doesn't have dedicated embedding API yet).
-pub struct AnthropicEmbeddingService {
-    #[allow(dead_code)]
-    api_key: String,
-}
-
-impl AnthropicEmbeddingService {
-    /// Create a new Anthropic embedding service.
-    ///
-    /// Note: This is a placeholder as Anthropic doesn't currently offer a dedicated embedding API.
-    ///
-    /// # Arguments
-    ///
-    /// * `api_key` - Anthropic API key
-    #[must_use]
-    pub const fn new(api_key: String) -> Self {
-        Self { api_key }
-    }
-}
-
-#[async_trait]
-impl EmbeddingService for AnthropicEmbeddingService {
-    async fn create_embedding(
-        &self,
-        _text: &str,
-        _model: &str,
-    ) -> Result<EmbeddingResponse, AppError> {
-        // Anthropic doesn't currently have a dedicated embeddings API
-        // This returns an error directing users to use OpenAI for embeddings
-        Err(AppError::Configuration(
-            "Anthropic does not currently offer a dedicated embeddings API. \
-             Please use OpenAI (provider: 'openai') for embeddings."
-                .to_string(),
-        ))
     }
 }
 

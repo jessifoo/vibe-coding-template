@@ -153,6 +153,7 @@ impl SupabaseItemService {
     /// Returns an error if the HTTP client cannot be created.
     pub fn new() -> Result<Self, AppError> {
         let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
             .build()
             .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
 
@@ -323,15 +324,17 @@ mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
+    use parking_lot::Mutex;
+
     /// Mock implementation for testing.
     pub struct MockItemService {
-        items: std::sync::Mutex<Vec<Item>>,
+        items: Mutex<Vec<Item>>,
     }
 
     impl MockItemService {
         pub fn new() -> Self {
             Self {
-                items: std::sync::Mutex::new(Vec::new()),
+                items: Mutex::new(Vec::new()),
             }
         }
     }
@@ -339,7 +342,7 @@ mod tests {
     #[async_trait]
     impl ItemService for MockItemService {
         async fn list_for_user(&self, user_id: &str) -> Result<Vec<Item>, AppError> {
-            let items = self.items.lock().unwrap();
+            let items = self.items.lock();
             Ok(items
                 .iter()
                 .filter(|i| i.user_id == user_id)
@@ -348,7 +351,7 @@ mod tests {
         }
 
         async fn get(&self, id: &str, user_id: &str) -> Result<Option<Item>, AppError> {
-            let items = self.items.lock().unwrap();
+            let items = self.items.lock();
             Ok(items
                 .iter()
                 .find(|i| i.id == id && i.user_id == user_id)
@@ -364,7 +367,7 @@ mod tests {
                 created_at: Utc::now().to_rfc3339(),
                 updated_at: Utc::now().to_rfc3339(),
             };
-            self.items.lock().unwrap().push(item.clone());
+            self.items.lock().push(item.clone());
             Ok(item)
         }
 
@@ -374,7 +377,7 @@ mod tests {
             user_id: &str,
             data: &UpdateItemData,
         ) -> Result<Item, AppError> {
-            let mut items = self.items.lock().unwrap();
+            let mut items = self.items.lock();
             let item = items
                 .iter_mut()
                 .find(|i| i.id == id && i.user_id == user_id)
@@ -392,7 +395,7 @@ mod tests {
         }
 
         async fn delete(&self, id: &str, user_id: &str) -> Result<(), AppError> {
-            let mut items = self.items.lock().unwrap();
+            let mut items = self.items.lock();
             let pos = items
                 .iter()
                 .position(|i| i.id == id && i.user_id == user_id)

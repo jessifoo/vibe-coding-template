@@ -315,10 +315,10 @@ CREATE INDEX idx_items_created_at ON public.items(created_at DESC);
 ```
 GET    /api/resources          # List resources
 POST   /api/resources          # Create resource
-GET    /api/resources/:id      # Get single resource
-PUT    /api/resources/:id      # Update resource (full)
-PATCH  /api/resources/:id      # Update resource (partial)
-DELETE /api/resources/:id      # Delete resource
+GET    /api/resources/{id}     # Get single resource
+PUT    /api/resources/{id}     # Update resource (full)
+PATCH  /api/resources/{id}     # Update resource (partial)
+DELETE /api/resources/{id}     # Delete resource
 ```
 
 ### Response Format
@@ -386,8 +386,9 @@ DELETE /api/resources/:id      # Delete resource
 
 ### Test File Location
 
-- Place tests next to source files: `user.rs` → `user_test.rs`
-- Or in `tests/` directory for integration tests
+- Prefer unit tests in the same file under `#[cfg(test)] mod tests { ... }` (or a submodule) so they compile with the crate
+- Add integration tests in the `tests/` directory; each file there is a separate crate that links against the library
+- A sibling `user_test.rs` is not picked up by Cargo automatically unless you add `mod user_test;` in `user.rs` or a parent module
 
 ### Test Naming
 

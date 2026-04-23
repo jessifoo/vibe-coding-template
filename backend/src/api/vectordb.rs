@@ -3,22 +3,24 @@
 //! Handles document storage and semantic search.
 
 use axum::{
-    extract::Json,
-    http::{header, HeaderMap, StatusCode},
+    extract::{Json, State},
+    http::{HeaderMap, StatusCode},
     routing::post,
     Router,
 };
 
+use crate::api::state::AppState;
+use crate::http_auth::bearer_token_from_headers;
 use crate::models::{
     AppError, DeleteDocumentsRequest, DocumentInput, DocumentUploadResponse, LlmProvider,
     SearchQuery, SearchResult,
 };
 use crate::services::llm::EmbeddingServiceFactory;
 use crate::services::supabase::SupabaseAuthService;
-use crate::services::vectordb::qdrant::{DocumentData, QdrantService};
+use crate::services::vectordb::qdrant::DocumentData;
 
 /// Create the vector database router.
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/documents", post(add_documents).delete(delete_documents))
         .route("/search", post(search_documents))
@@ -29,6 +31,7 @@ pub fn router() -> Router {
 /// Creates embeddings for each document and stores them in Qdrant.
 #[axum::debug_handler]
 async fn add_documents(
+    State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<DocumentInput>,
 ) -> Result<Json<DocumentUploadResponse>, AppError> {
@@ -76,7 +79,7 @@ async fn add_documents(
         .collect();
 
     // Add to vector database
-    let vector_db = QdrantService::new().await?;
+    let vector_db = &*state.qdrant;
     let document_ids = vector_db
         .add_documents(&documents, &embeddings, Some(&metadata))
         .await?;
@@ -95,6 +98,7 @@ async fn add_documents(
 /// Creates an embedding for the query and performs semantic search.
 #[axum::debug_handler]
 async fn search_documents(
+    State(state): State<AppState>,
     headers: HeaderMap,
     Json(query): Json<SearchQuery>,
 ) -> Result<Json<Vec<SearchResult>>, AppError> {
@@ -121,7 +125,7 @@ async fn search_documents(
         .await?;
 
     // Search vector database
-    let vector_db = QdrantService::new().await?;
+    let vector_db = &*state.qdrant;
     let results = vector_db
         .search(
             &embedding_response.embedding,
@@ -142,6 +146,7 @@ async fn search_documents(
 /// Delete documents from the vector database.
 #[axum::debug_handler]
 async fn delete_documents(
+    State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<DeleteDocumentsRequest>,
 ) -> Result<StatusCode, AppError> {
@@ -159,7 +164,7 @@ async fn delete_documents(
     );
 
     // Delete from vector database
-    let vector_db = QdrantService::new().await?;
+    let vector_db = &*state.qdrant;
     let success = vector_db.delete(&request.document_ids).await?;
 
     if success {
@@ -178,27 +183,9 @@ async fn delete_documents(
 
 /// Authenticate user from request headers.
 async fn authenticate(headers: &HeaderMap) -> Result<crate::models::UserProfile, AppError> {
-    let token = extract_bearer_token(headers)?;
+    let token = bearer_token_from_headers(headers)?;
     let auth_service = SupabaseAuthService::new()?;
     auth_service.get_user(&token).await
-}
-
-/// Extract bearer token from Authorization header.
-fn extract_bearer_token(headers: &HeaderMap) -> Result<String, AppError> {
-    let auth_header = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| AppError::Unauthorized("Missing Authorization header".to_string()))?;
-
-    auth_header
-        .strip_prefix("Bearer ")
-        .or_else(|| auth_header.strip_prefix("bearer "))
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            AppError::Unauthorized(
-                "Invalid Authorization header format. Expected: Bearer <token>".to_string(),
-            )
-        })
 }
 
 /// Truncate string for logging (character-safe for UTF-8).
@@ -207,9 +194,6 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars()
-            .take(max_len)
-            .collect::<String>()
-            + "..."
+        s.chars().take(max_len).collect::<String>() + "..."
     }
 }

@@ -51,6 +51,16 @@ impl IntoResponse for ApiErrorResponse {
     }
 }
 
+/// Fatal errors when building or starting the HTTP server (outside request handling).
+#[derive(Debug, Error)]
+pub enum AppRunError {
+    #[error("Failed to initialize Qdrant: {0}")]
+    QdrantInit(AppError),
+
+    #[error("Server bind or accept error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
 /// Application error type.
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -120,7 +130,22 @@ impl IntoResponse for AppError {
 
 impl From<reqwest::Error> for AppError {
     fn from(err: reqwest::Error) -> Self {
-        Self::ExternalService(err.to_string())
+        if err.is_timeout() {
+            return Self::ExternalService(format!("HTTP client timeout: {err}"));
+        }
+        if err.is_connect() {
+            return Self::ExternalService(format!("HTTP connect error: {err}"));
+        }
+        if let Some(status) = err.status() {
+            let target = err
+                .url()
+                .map(|u| u.as_str().to_string())
+                .unwrap_or_default();
+            return Self::ExternalService(format!(
+                "HTTP error (status {status}): {err}; url={target}"
+            ));
+        }
+        Self::ExternalService(format!("HTTP request error: {err}"))
     }
 }
 

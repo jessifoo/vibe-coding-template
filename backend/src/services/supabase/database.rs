@@ -8,6 +8,34 @@ use reqwest::Client;
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 
+/// Reject table names with characters unsafe for path segments (injection, traversal).
+fn validate_table_name(table: &str) -> Result<(), AppError> {
+    if table.is_empty()
+        || !table
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(AppError::BadRequest(format!(
+            "Invalid table name (use letters, digits, underscore only): {table}"
+        )));
+    }
+    Ok(())
+}
+
+/// PostgREST `column=eq.value` filter, both sides URL-encoded.
+fn filter_query_pair(column: &str, value: &str) -> String {
+    use std::fmt::Write;
+
+    let mut s = String::new();
+    let _ = write!(
+        s,
+        "&{}={}",
+        urlencoding::encode(column),
+        urlencoding::encode(&format!("eq.{value}"))
+    );
+    s
+}
+
 /// Service for interacting with Supabase database.
 #[derive(Clone)]
 pub struct SupabaseDatabaseService {
@@ -50,11 +78,17 @@ impl SupabaseDatabaseService {
         table: &str,
         filters: Option<&HashMap<String, String>>,
     ) -> Result<Vec<T>, AppError> {
+        validate_table_name(table)?;
         let mut url = format!("{}/{table}?select=*", self.base_url);
 
         if let Some(filters) = filters {
             for (key, value) in filters {
-                url.push_str(&format!("&{key}=eq.{value}"));
+                if key.is_empty() {
+                    return Err(AppError::BadRequest(
+                        "Filter key cannot be empty".to_string(),
+                    ));
+                }
+                url.push_str(&filter_query_pair(key, value));
             }
         }
 
@@ -95,7 +129,12 @@ impl SupabaseDatabaseService {
         table: &str,
         id: &str,
     ) -> Result<Option<T>, AppError> {
-        let url = format!("{}/{table}?id=eq.{id}&select=*", self.base_url);
+        validate_table_name(table)?;
+        let url = format!(
+            "{}/{table}?select=*&id={}",
+            self.base_url,
+            urlencoding::encode(&format!("eq.{id}"))
+        );
 
         let response = self
             .client
@@ -141,6 +180,7 @@ impl SupabaseDatabaseService {
         table: &str,
         data: &D,
     ) -> Result<T, AppError> {
+        validate_table_name(table)?;
         let url = format!("{}/{table}", self.base_url);
 
         let response = self
@@ -190,7 +230,12 @@ impl SupabaseDatabaseService {
         id: &str,
         data: &D,
     ) -> Result<T, AppError> {
-        let url = format!("{}/{table}?id=eq.{id}", self.base_url);
+        validate_table_name(table)?;
+        let url = format!(
+            "{}/{table}?id={}",
+            self.base_url,
+            urlencoding::encode(&format!("eq.{id}"))
+        );
 
         let response = self
             .client
@@ -232,7 +277,12 @@ impl SupabaseDatabaseService {
     ///
     /// Returns an error if the delete fails.
     pub async fn delete(&self, table: &str, id: &str) -> Result<bool, AppError> {
-        let url = format!("{}/{table}?id=eq.{id}", self.base_url);
+        validate_table_name(table)?;
+        let url = format!(
+            "{}/{table}?id={}",
+            self.base_url,
+            urlencoding::encode(&format!("eq.{id}"))
+        );
 
         let response = self
             .client
