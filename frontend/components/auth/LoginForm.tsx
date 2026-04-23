@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { signInWithGoogle, signInWithLinkedIn, signInWithEmail, signUpWithEmail, resetPassword } from '@/services/supabase';
+import { getErrorMessage } from '@/lib/errors';
 
 export default function LoginForm() {
   const [isLoading, setIsLoading] = useState({
@@ -19,8 +20,8 @@ export default function LoginForm() {
       setIsLoading({ ...isLoading, google: true });
       const { error } = await signInWithGoogle();
       if (error) throw error;
-    } catch (err: any) {
-      setError(err.message || 'Failed to sign in with Google');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to sign in with Google'));
     } finally {
       setIsLoading({ ...isLoading, google: false });
     }
@@ -32,8 +33,8 @@ export default function LoginForm() {
       setIsLoading({ ...isLoading, linkedin: true });
       const { error } = await signInWithLinkedIn();
       if (error) throw error;
-    } catch (err: any) {
-      setError(err.message || 'Failed to sign in with LinkedIn');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Failed to sign in with LinkedIn'));
     } finally {
       setIsLoading({ ...isLoading, linkedin: false });
     }
@@ -58,8 +59,8 @@ export default function LoginForm() {
         if (error) throw error;
         setSuccess('Check your email for the password reset link.');
       }
-    } catch (err: any) {
-      setError(err.message || 'Authentication failed');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, 'Authentication failed'));
     } finally {
       setIsLoading({ ...isLoading, email: false });
     }

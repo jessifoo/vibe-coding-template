@@ -1,13 +1,16 @@
 import { useState } from 'react';
-import { generateText, TextGenerationRequest, TextGenerationResponse } from '@/services/llm';
+import { generateText, type TextGenerationRequest, type TextGenerationResponse } from '@/services/llm';
+import type { LlmProvider } from '@/lib/api-types';
+
+type Settings = Omit<TextGenerationRequest, 'prompt'>;
 
 export default function TextGenerator() {
   const [prompt, setPrompt] = useState('');
   const [response, setResponse] = useState<TextGenerationResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [settings, setSettings] = useState<Omit<TextGenerationRequest, 'prompt'>>({
-    model: 'gpt-3.5-turbo',
+  const [settings, setSettings] = useState<Settings>({
+    model: 'gpt-4o-mini',
     max_tokens: 500,
     temperature: 0.7,
     provider: 'openai',
@@ -29,15 +32,20 @@ export default function TextGenerator() {
 
       const result = await generateText(request);
       setResponse(result);
-    } catch (err: any) {
-      setError(err.message || 'Failed to generate text');
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to generate text'
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSettingChange = (key: keyof typeof settings, value: any) => {
-    setSettings({ ...settings, [key]: value });
+  const handleSettingChange = <K extends keyof Settings>(
+    key: K,
+    value: Settings[K]
+  ) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
   return (
@@ -68,7 +76,9 @@ export default function TextGenerator() {
             <select
               id="provider"
               value={settings.provider}
-              onChange={(e) => handleSettingChange('provider', e.target.value)}
+              onChange={(e) =>
+                handleSettingChange('provider', e.target.value as LlmProvider)
+              }
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500"
             >
               <option value="openai">OpenAI</option>
@@ -161,7 +171,7 @@ export default function TextGenerator() {
             Model: {response.model} •
             Tokens: {response.usage.total_tokens} (
             {response.usage.prompt_tokens} prompt,
-            {response.usage.completion_tokens} completion)
+            {response.usage.completion_tokens ?? 0} completion)
           </div>
         </div>
       )}

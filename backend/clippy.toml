@@ -1,0 +1,3 @@
+# Allow unwrap/expect in #[test] / #[tokio::test] only (matches project rules).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
