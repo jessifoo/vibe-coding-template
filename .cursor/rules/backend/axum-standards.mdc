@@ -44,8 +44,9 @@ Always use the `#[axum::debug_handler]` attribute for better error messages:
 use axum::{extract::Json, http::HeaderMap, routing::post, Router};
 use validator::Validate;
 use crate::models::{AppError, CreateItemRequest, ItemResponse};
+use crate::api::state::AppState;
 
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/items", post(create_item))
 }
@@ -194,7 +195,10 @@ Use strong typing for configuration:
 use once_cell::sync::Lazy;
 
 pub static SETTINGS: Lazy<Settings> = Lazy::new(|| {
-    Settings::from_env().expect("Failed to load settings")
+    Settings::from_env().unwrap_or_else(|e| {
+        eprintln!("Failed to load settings: {}", e);
+        std::process::exit(1);
+    })
 });
 
 #[derive(Debug, Clone)]
@@ -208,7 +212,7 @@ pub struct Settings {
 impl Settings {
     pub fn from_env() -> Result<Self, SettingsError> {
         let _ = dotenvy::dotenv(); // Load .env if present
-        
+
         Ok(Self {
             environment: env::var("ENVIRONMENT")
                 .unwrap_or_else(|_| "development".to_string())

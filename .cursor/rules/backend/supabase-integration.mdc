@@ -102,10 +102,14 @@ impl SupabaseDatabaseService {
             .await?;
         
         if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
-            return Err(AppError::ExternalService(error));
+            let status = response.status();
+            let error = response.text().await
+                .map_err(|e| AppError::ExternalService(format!("Failed to read error body (status {status}): {e}")))?;
+            return Err(AppError::ExternalService(format!(
+                "Request failed (status {status}): {error}"
+            )));
         }
-        
+
         response.json().await.map_err(Into::into)
     }
     

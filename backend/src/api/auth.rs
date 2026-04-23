@@ -13,6 +13,7 @@ use crate::api::state::AppState;
 use crate::http_auth::bearer_token_from_headers;
 use crate::models::{AppError, ProviderTokenRequest, TokenResponse, UserProfile};
 use crate::services::supabase::SupabaseAuthService;
+use validator::Validate;
 
 /// Create the auth router.
 pub fn router() -> Router<AppState> {
@@ -42,7 +43,6 @@ async fn exchange_provider_token(
     Json(request): Json<ProviderTokenRequest>,
 ) -> Result<Json<TokenResponse>, AppError> {
     // Validate request
-    use validator::Validate;
     request.validate().map_err(AppError::from)?;
 
     let auth_service = SupabaseAuthService::new()?;

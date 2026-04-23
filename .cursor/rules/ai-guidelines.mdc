@@ -12,7 +12,7 @@ These guidelines ensure AI assistants produce high-quality, maintainable code.
 
 ### 1. No Shortcuts or Quick Fixes
 - **NEVER** use `any` type in TypeScript
-- **NEVER** use `.unwrap()` or `.expect()` in Rust (except in tests or main)
+- **NEVER** use `.unwrap()` or `.expect()` in Rust (except in tests)
 - **NEVER** use `// @ts-ignore` or `// @ts-nocheck`
 - **NEVER** suppress linter warnings without documented justification
 - **NEVER** leave TODO comments without sufficient context and a tracking reference (issue/task ID)
@@ -139,7 +139,7 @@ Before considering any code complete:
 - [ ] `cargo fmt` has been run
 - [ ] All public functions have doc comments
 - [ ] All public types have doc comments
-- [ ] No `.unwrap()` or `.expect()` outside of tests
+- [ ] No `.unwrap()` or `.expect()` (except in tests)
 - [ ] All errors are properly typed and handled
 - [ ] Logging added for important operations
 

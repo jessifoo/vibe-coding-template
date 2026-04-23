@@ -136,13 +136,22 @@ impl SupabaseStorageService {
                     "Storage path must be relative and cannot contain '..'".to_string(),
                 ));
             }
-            Some(p) => format!("{p}/{unique_filename}"),
-            None => unique_filename,
+            Some(p) => {
+                // URL-encode each path segment individually
+                let encoded_segments: Vec<String> = p.split('/')
+                    .map(|seg| urlencoding::encode(seg).into_owned())
+                    .collect();
+                let encoded_path = encoded_segments.join("/");
+                format!("{}/{}", encoded_path, urlencoding::encode(&unique_filename))
+            }
+            None => urlencoding::encode(&unique_filename).into_owned(),
         };
 
         let url = format!(
             "{}/object/{}/{}",
-            self.base_url, self.bucket_name, full_path
+            self.base_url,
+            urlencoding::encode(&self.bucket_name),
+            full_path
         );
 
         let response = self
@@ -190,7 +199,28 @@ impl SupabaseStorageService {
     ///
     /// Returns an error if the deletion fails.
     pub async fn delete_file(&self, path: &str) -> Result<bool, AppError> {
-        let url = format!("{}/object/{}/{}", self.base_url, self.bucket_name, path);
+        // Validate path
+        if path.is_empty() {
+            return Err(AppError::BadRequest("File path cannot be empty".to_string()));
+        }
+        if path.contains("..") || path.starts_with('/') {
+            return Err(AppError::BadRequest(
+                "File path must be relative and cannot contain '..'".to_string(),
+            ));
+        }
+
+        // URL-encode each path segment
+        let encoded_segments: Vec<String> = path.split('/')
+            .map(|seg| urlencoding::encode(seg).into_owned())
+            .collect();
+        let encoded_path = encoded_segments.join("/");
+
+        let url = format!(
+            "{}/object/{}/{}",
+            self.base_url,
+            urlencoding::encode(&self.bucket_name),
+            encoded_path
+        );
 
         let response = self
             .client

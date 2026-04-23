@@ -56,7 +56,7 @@ fn build_cors_layer() -> CorsLayer {
         .filter_map(|origin| origin.parse().ok())
         .collect();
 
-    let cors = if origins.is_empty() {
+    let mut cors = if origins.is_empty() {
         if SETTINGS.environment == Environment::Development {
             tracing::warn!("No CORS origins configured, allowing any origin (development mode)");
             CorsLayer::new().allow_origin(Any)
@@ -65,25 +65,30 @@ fn build_cors_layer() -> CorsLayer {
             CorsLayer::new()
         }
     } else {
-        CorsLayer::new().allow_origin(origins)
+        // Only enable credentials when using specific origins
+        CorsLayer::new()
+            .allow_origin(origins)
+            .allow_credentials(true)
     };
 
-    cors.allow_methods([
-        Method::GET,
-        Method::POST,
-        Method::PUT,
-        Method::DELETE,
-        Method::OPTIONS,
-        Method::PATCH,
-    ])
-    .allow_headers([
-        header::CONTENT_TYPE,
-        header::AUTHORIZATION,
-        header::ACCEPT,
-        header::ORIGIN,
-    ])
-    .allow_credentials(true)
-    .max_age(std::time::Duration::from_secs(600))
+    cors = cors
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+            Method::PATCH,
+        ])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            header::ACCEPT,
+            header::ORIGIN,
+        ])
+        .max_age(std::time::Duration::from_secs(600));
+
+    cors
 }
 
 /// Health check at `/`.
@@ -108,7 +113,12 @@ pub async fn run() -> Result<(), AppRunError> {
     );
 
     let app = build_app().await?;
-    let addr = SocketAddr::from(([0, 0, 0, 0], SETTINGS.server.port));
+    let bind_address = format!("{}:{}", SETTINGS.server.host, SETTINGS.server.port);
+    let addr: SocketAddr = bind_address.parse()
+        .map_err(|e| std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Invalid bind address '{}': {}", bind_address, e)
+        ))?;
 
     tracing::info!(
         address = %addr,

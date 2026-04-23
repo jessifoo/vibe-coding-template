@@ -6,6 +6,7 @@
 //! requests are validated.
 
 pub mod auth;
+pub mod defaults;
 pub mod error;
 pub mod llm;
 pub mod vectordb;

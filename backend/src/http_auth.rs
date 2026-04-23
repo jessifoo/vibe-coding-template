@@ -11,16 +11,27 @@ use crate::models::AppError;
 ///
 /// # Errors
 ///
-/// Returns [`AppError::Unauthorized`] when the header is not a `Bearer` token.
+/// Returns [`AppError::Unauthorized`] when the header is not a `Bearer` token or token is empty.
 pub fn bearer_token_from_value(header: &str) -> Result<&str, AppError> {
-    header
-        .strip_prefix("Bearer ")
-        .or_else(|| header.strip_prefix("bearer "))
-        .ok_or_else(|| {
-            AppError::Unauthorized(
-                "Invalid Authorization header format. Expected: Bearer <token>".to_string(),
-            )
-        })
+    let (scheme, token) = header.split_once(' ').ok_or_else(|| {
+        AppError::Unauthorized(
+            "Invalid Authorization header format. Expected: Bearer <token>".to_string(),
+        )
+    })?;
+
+    if !scheme.eq_ignore_ascii_case("Bearer") {
+        return Err(AppError::Unauthorized(
+            "Invalid Authorization scheme. Expected: Bearer".to_string(),
+        ));
+    }
+
+    if token.trim().is_empty() {
+        return Err(AppError::Unauthorized(
+            "Authorization token cannot be empty".to_string(),
+        ));
+    }
+
+    Ok(token)
 }
 
 /// Extract a Bearer token from the request and return it as a `String` for
@@ -29,13 +40,16 @@ pub fn bearer_token_from_value(header: &str) -> Result<&str, AppError> {
 ///
 /// # Errors
 ///
-/// Returns [`AppError::Unauthorized`] if the `Authorization` header is missing
-/// or not a `Bearer` token.
+/// Returns [`AppError::Unauthorized`] if the `Authorization` header is missing,
+/// not UTF-8, or not a `Bearer` token.
 pub fn bearer_token_from_headers(headers: &HeaderMap) -> Result<String, AppError> {
-    let auth_header = headers
+    let auth_header_value = headers
         .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
         .ok_or_else(|| AppError::Unauthorized("Missing Authorization header".to_string()))?;
+
+    let auth_header = auth_header_value.to_str().map_err(|_| {
+        AppError::Unauthorized("Invalid Authorization header encoding (non-UTF8)".to_string())
+    })?;
 
     Ok(bearer_token_from_value(auth_header)?.to_string())
 }

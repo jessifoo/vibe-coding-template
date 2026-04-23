@@ -13,6 +13,9 @@ use crate::services::vectordb::qdrant::QdrantService;
 pub struct AppState {
     /// Qdrant client; one per process, injected into handlers.
     pub qdrant: Arc<QdrantService>,
+
+    /// Shared HTTP client for making external requests.
+    pub reqwest_client: Arc<reqwest::Client>,
 }
 
 impl AppState {
@@ -26,8 +29,17 @@ impl AppState {
         let qdrant = QdrantService::new()
             .await
             .map_err(AppRunError::QdrantInit)?;
+
+        let reqwest_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| AppRunError::QdrantInit(
+                crate::models::AppError::Configuration(format!("Failed to create HTTP client: {e}"))
+            ))?;
+
         Ok(Self {
             qdrant: Arc::new(qdrant),
+            reqwest_client: Arc::new(reqwest_client),
         })
     }
 }

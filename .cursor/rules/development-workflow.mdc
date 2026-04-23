@@ -230,6 +230,8 @@ git commit -m "docs(readme): update setup instructions"
 
 #### TypeScript Frontend
 - [ ] `npm run lint` passes
+- [ ] `npm run typecheck` (or `tsc --noEmit`) passes
+- [ ] `npm test` (or `npm run test`) passes
 - [ ] `npm run build` passes
 - [ ] No `any` types
 

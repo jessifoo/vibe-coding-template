@@ -260,11 +260,23 @@ impl Settings {
         };
 
         // Parse Supabase config (required)
+        let supabase_url = env::var("SUPABASE_URL")
+            .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_URL".to_string()))?;
+        let supabase_url = supabase_url.trim().to_string();
+        if supabase_url.is_empty() {
+            return Err(SettingsError::InvalidValue("SUPABASE_URL cannot be empty or whitespace".to_string()));
+        }
+
+        let supabase_service_key = env::var("SUPABASE_SERVICE_KEY")
+            .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_SERVICE_KEY".to_string()))?;
+        let supabase_service_key = supabase_service_key.trim().to_string();
+        if supabase_service_key.is_empty() {
+            return Err(SettingsError::InvalidValue("SUPABASE_SERVICE_KEY cannot be empty or whitespace".to_string()));
+        }
+
         let supabase = SupabaseConfig {
-            url: env::var("SUPABASE_URL")
-                .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_URL".to_string()))?,
-            service_key: env::var("SUPABASE_SERVICE_KEY")
-                .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_SERVICE_KEY".to_string()))?,
+            url: supabase_url,
+            service_key: supabase_service_key,
             anon_key: env::var("SUPABASE_ANON_KEY").ok(),
             jwt_secret: env::var("SUPABASE_JWT_SECRET").ok(),
         };

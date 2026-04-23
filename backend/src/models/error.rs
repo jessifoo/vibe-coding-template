@@ -151,7 +151,7 @@ impl From<reqwest::Error> for AppError {
 
 impl From<serde_json::Error> for AppError {
     fn from(err: serde_json::Error) -> Self {
-        Self::BadRequest(format!("JSON error: {err}"))
+        Self::Internal(format!("JSON error: {err}"))
     }
 }
 

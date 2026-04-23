@@ -44,7 +44,7 @@ pub struct DocumentInput {
 }
 
 fn default_embedding_model() -> String {
-    "text-embedding-3-small".to_string()
+    crate::models::defaults::default_embedding_model()
 }
 
 /// Response from adding documents.

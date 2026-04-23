@@ -1,4 +1,5 @@
 .PHONY: dev dev-frontend dev-backend prod prod-frontend prod-backend clean help
+.PHONY: logs stop prod-logs prod-stop
 .PHONY: db-migration-new db-apply db-list db-push db-status
 .PHONY: install-frontend build-frontend install-backend build-backend test-backend lint-backend check-backend fmt-backend ci ci-full lint-frontend test-frontend
 
@@ -24,6 +25,14 @@ dev-backend: ## Start only the backend development server
 	@echo "${GREEN}Starting backend development server...${NC}"
 	docker-compose up backend
 
+logs: ## Stream logs from all development services
+	@echo "${GREEN}Streaming development logs...${NC}"
+	docker-compose logs -f
+
+stop: ## Stop all development services
+	@echo "${YELLOW}Stopping development services...${NC}"
+	docker-compose down
+
 # Production environment
 prod: ## Start the full production environment
 	@echo "${GREEN}Starting full production environment...${NC}"
@@ -36,6 +45,14 @@ prod-frontend: ## Start only the frontend production server
 prod-backend: ## Start only the backend production server
 	@echo "${GREEN}Starting backend production server...${NC}"
 	docker-compose -f docker-compose.prod.yml up -d backend
+
+prod-logs: ## Stream logs from production services
+	@echo "${GREEN}Streaming production logs...${NC}"
+	docker-compose -f docker-compose.prod.yml logs -f
+
+prod-stop: ## Stop all production services
+	@echo "${YELLOW}Stopping production services...${NC}"
+	docker-compose -f docker-compose.prod.yml down
 
 # Clean up
 clean: ## Remove containers and volumes

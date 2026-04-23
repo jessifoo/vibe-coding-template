@@ -130,12 +130,12 @@ expect_used = "warn"
 ### Command Reference
 
 ```bash
-cargo check          # Quick compilation check
-cargo build          # Full build
-cargo test           # Run tests
-cargo clippy         # Run linter
-cargo fmt            # Format code
-cargo doc --open     # Generate and view docs
+cargo check              # Quick compilation check
+cargo build              # Full build
+cargo test               # Run tests
+cargo clippy -- -D warnings  # Run linter (warnings treated as errors)
+cargo fmt                # Format code
+cargo doc --open         # Generate and view docs
 ```
 
 ---

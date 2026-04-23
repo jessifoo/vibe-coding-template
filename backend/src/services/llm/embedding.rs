@@ -81,7 +81,6 @@ impl EmbeddingService for OpenAiEmbeddingService {
         #[derive(Deserialize)]
         struct EmbeddingUsage {
             prompt_tokens: u32,
-            #[allow(dead_code)]
             total_tokens: u32,
         }
 
@@ -121,7 +120,11 @@ impl EmbeddingService for OpenAiEmbeddingService {
         Ok(EmbeddingResponse {
             embedding,
             model: model.to_string(),
-            usage: LlmUsage::embedding(openai_response.usage.prompt_tokens),
+            usage: LlmUsage {
+                prompt_tokens: openai_response.usage.prompt_tokens,
+                completion_tokens: None,
+                total_tokens: openai_response.usage.total_tokens,
+            },
         })
     }
 }

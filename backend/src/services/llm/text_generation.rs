@@ -101,8 +101,6 @@ impl LlmService for OpenAiService {
         struct Usage {
             prompt_tokens: u32,
             completion_tokens: u32,
-            #[allow(dead_code)]
-            total_tokens: u32,
         }
 
         let request = OpenAiRequest {
