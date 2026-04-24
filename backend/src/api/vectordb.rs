@@ -81,7 +81,7 @@ async fn add_documents(
     // Add to vector database
     let vector_db = &*state.qdrant;
     let document_ids = vector_db
-        .add_documents(&documents, &embeddings, Some(&metadata))
+        .add_documents(&documents, &embeddings, Some(&metadata), &user.id)
         .await?;
 
     tracing::info!(
@@ -130,6 +130,7 @@ async fn search_documents(
         .search(
             &embedding_response.embedding,
             query.limit,
+            &user.id,
             query.filter_metadata.as_ref(),
         )
         .await?;
@@ -165,7 +166,7 @@ async fn delete_documents(
 
     // Delete from vector database
     let vector_db = &*state.qdrant;
-    let success = vector_db.delete(&request.document_ids).await?;
+    let success = vector_db.delete(&request.document_ids, &user.id).await?;
 
     if success {
         tracing::info!(
