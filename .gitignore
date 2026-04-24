@@ -1,4 +1,4 @@
-
+# Environment and secrets (never commit)
 .env
 .env.*
 !.env.example
@@ -6,12 +6,12 @@
 .env.development.local
 .env.test.local
 .env.production.local
-# Dependencies
-/node_modules
-/.pnp
+
+# Dependencies (all package managers / locations)
+node_modules/
+**/node_modules/
+.pnp
 .pnp.js
-/frontend/node_modules
-**/node_modules
 **/__pycache__/
 *.py[cod]
 *$py.class
@@ -20,17 +20,26 @@
 /backend/env/
 /backend/venv/
 /backend/.venv/
-# Build files
-/dist
-/build
-/frontend/.next/
-/frontend/out/
-/frontend/build
+# Build outputs
+dist/
+build/
+out/
+.next/
+**/.next/
+.turbo/
+.vercel/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+storybook-static/
+
+# Next.js: keep `next-env.d.ts` in version control (do not ignore)
+
 **/*.min.js
 **/*.min.css
-/backend/build/
-/backend/dist/
-/backend/*.egg-info/
+backend/build/
+backend/dist/
+backend/*.egg-info/
 
 # Caches and logs
 __pycache__/
@@ -42,9 +51,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .eslintcache
-next-env.d.ts
-.vercel
-.turbo
 
 # OS files
 .DS_Store
@@ -68,3 +74,17 @@ qdrant_data/
 .supabase
 supabase/.branches
 supabase/.temp
+
+# Rust / Cargo (never commit — use `cargo build` locally or in CI)
+**/target/
+*.rs.bk
+**/*.rlib
+**/*.prof*
+
+# IDE / local tooling
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*~

@@ -1,113 +1,363 @@
----
-description: LLM Integration Patterns for OpenAI and Anthropic
-globs: ["backend/app/services/llm/**/*.py", "backend/app/api/endpoints/llm.py"]
-alwaysApply: false
----
+# LLM Integration Standards (Rust)
 
-# LLM Integration Standards
+> Apply these standards when working with LLM services in the Rust backend.
 
-## LLM Service Usage
+## Service Architecture
 
-Use the abstracted LLM service for text generation:
+LLM services use Rust traits for abstraction:
 
-```python
-from app.services.llm.llm_service import LLMServiceFactory
+```rust
+use async_trait::async_trait;
+use crate::models::{AppError, TextGenerationResponse};
 
-# Get service instance
-llm_service = LLMServiceFactory.get_service("openai")  # or "anthropic"
-
-# Generate text
-response = await llm_service.generate(
-    prompt="Your prompt here",
-    model="gpt-4",
-    temperature=0.7,
-    max_tokens=1000
-)
-
-# Access response data
-generated_text = response.content
-usage_stats = response.usage
+/// Trait for LLM text generation services.
+#[async_trait]
+pub trait LlmService: Send + Sync {
+    async fn generate_text(
+        &self,
+        prompt: &str,
+        model: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> Result<TextGenerationResponse, AppError>;
+}
 ```
 
-## Embedding Service Usage
+## Supported Providers
 
-Use the embedding service for vector generation:
+### OpenAI
+```rust
+use crate::http_error::read_failed_response_text;
 
-```python
-from app.services.llm.embedding_service import EmbeddingServiceFactory
+pub struct OpenAiService {
+    client: Client,
+    api_key: String,
+}
 
-# Get service instance
-embedding_service = EmbeddingServiceFactory.get_service("openai")
+impl OpenAiService {
+    pub fn new(api_key: String) -> Result<Self, AppError> {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .map_err(|e| AppError::Configuration(e.to_string()))?;
+        Ok(Self { client, api_key })
+    }
+}
 
-# Create embeddings
-response = await embedding_service.create_embedding(
-    text="Text to embed",
-    model="text-embedding-ada-002"
-)
+#[async_trait]
+impl LlmService for OpenAiService {
+    async fn generate_text(
+        &self,
+        prompt: &str,
+        model: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> Result<TextGenerationResponse, AppError> {
+        // Build request payload
+        #[derive(serde::Serialize)]
+        struct ChatRequest<'a> {
+            model: &'a str,
+            messages: Vec<Message<'a>>,
+            max_tokens: u32,
+            temperature: f32,
+        }
 
-# Access embedding vector
-vector = response.embedding
-usage_stats = response.usage
-```
+        #[derive(serde::Serialize)]
+        struct Message<'a> {
+            role: &'a str,
+            content: &'a str,
+        }
 
-## Model Configuration
+        let request = ChatRequest {
+            model,
+            messages: vec![Message {
+                role: "user",
+                content: prompt,
+            }],
+            max_tokens,
+            temperature,
+        };
 
-Use appropriate models for different use cases:
+        let response = self.client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| AppError::ExternalService(e.to_string()))?;
 
-### OpenAI Models
-- **gpt-4**: Complex reasoning, analysis, code generation
-- **gpt-3.5-turbo**: General purpose, faster responses
-- **text-embedding-ada-002**: Text embeddings
+        if !response.status().is_success() {
+            let (status, body) = read_failed_response_text(response).await?;
+            return Err(AppError::ExternalService(format!(
+                "OpenAI API error (status {status}): {body}"
+            )));
+        }
 
-### Anthropic Models
-- **claude-3-opus**: Most capable, complex tasks
-- **claude-3-sonnet**: Balanced performance and speed
-- **claude-3-haiku**: Fast responses, simple tasks
+        // Parse response (example - adjust to match actual OpenAI response structure)
+        let openai_response: OpenAiResponse = response.json().await
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))?;
 
-## Error Handling
-
-Handle LLM-specific errors:
-
-```python
-try:
-    response = await llm_service.generate(prompt, model="gpt-4")
-except Exception as e:
-    if "rate limit" in str(e).lower():
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
-    elif "invalid model" in str(e).lower():
-        raise HTTPException(status_code=400, detail="Invalid model specified")
-    elif "context length" in str(e).lower():
-        raise HTTPException(status_code=400, detail="Prompt too long")
-    else:
-        raise HTTPException(status_code=500, detail="LLM service error")
-```
-
-## Usage Tracking
-
-Always track and log usage statistics:
-
-```python
-response = await llm_service.generate(prompt, model="gpt-4")
-
-# Log usage for monitoring
-logger.info(f"LLM Usage - Model: {model}, Tokens: {response.usage.total_tokens}")
-
-# Return usage info to client
-return {
-    "content": response.content,
-    "usage": {
-        "prompt_tokens": response.usage.prompt_tokens,
-        "completion_tokens": response.usage.completion_tokens,
-        "total_tokens": response.usage.total_tokens
+        Ok(TextGenerationResponse {
+            text: openai_response.choices[0].message.content.clone(),
+            model: model.to_string(),
+            usage: LlmUsage::completion(
+                openai_response.usage.prompt_tokens,
+                openai_response.usage.completion_tokens,
+            ),
+        })
     }
 }
 ```
 
-## Prompt Engineering Best Practices
+### Anthropic
+```rust
+use std::time::Duration;
 
-- Be specific and clear in prompts
-- Use system messages for context setting
-- Include examples when helpful
-- Set appropriate temperature values (0.0-1.0)
-- Use max_tokens to control response length
-- Consider using stop sequences for structured output
+use crate::http_error::read_failed_response_text;
+
+pub struct AnthropicService {
+    client: Client,
+    api_key: String,
+}
+
+impl AnthropicService {
+    pub fn new(api_key: String) -> Result<Self, AppError> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .map_err(|e| AppError::Configuration(e.to_string()))?;
+        Ok(Self { client, api_key })
+    }
+}
+
+#[async_trait]
+impl LlmService for AnthropicService {
+    async fn generate_text(
+        &self,
+        prompt: &str,
+        model: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> Result<TextGenerationResponse, AppError> {
+        // Build request payload matching Anthropic's /v1/messages schema
+        #[derive(serde::Serialize)]
+        struct MessagesRequest<'a> {
+            model: &'a str,
+            messages: Vec<Message<'a>>,
+            max_tokens: u32,
+            temperature: f32,
+        }
+
+        #[derive(serde::Serialize)]
+        struct Message<'a> {
+            role: &'a str,
+            content: &'a str,
+        }
+
+        let request = MessagesRequest {
+            model,
+            messages: vec![Message {
+                role: "user",
+                content: prompt,
+            }],
+            max_tokens,
+            temperature,
+        };
+
+        let response = self.client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| AppError::ExternalService(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let (status, body) = read_failed_response_text(response).await?;
+            return Err(AppError::ExternalService(format!(
+                "Anthropic API error (status {status}): {body}"
+            )));
+        }
+
+        // Parse response (example - adjust to match actual Anthropic response structure)
+        let anthropic_response: AnthropicResponse = response.json().await
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))?;
+
+        Ok(TextGenerationResponse {
+            text: anthropic_response.content[0].text.clone(),
+            model: model.to_string(),
+            usage: LlmUsage::completion(
+                anthropic_response.usage.input_tokens,
+                anthropic_response.usage.output_tokens,
+            ),
+        })
+    }
+}
+```
+
+## Factory Pattern
+
+Use a factory to create the appropriate service:
+
+```rust
+pub struct LlmServiceFactory;
+
+impl LlmServiceFactory {
+    pub fn get_service(provider: LlmProvider) -> Result<Box<dyn LlmService>, AppError> {
+        match provider {
+            LlmProvider::OpenAI => {
+                let api_key = SETTINGS.llm.openai_api_key
+                    .clone()
+                    .filter(|k| !k.is_empty())
+                    .ok_or_else(|| AppError::Configuration(
+                        "OpenAI API key not configured".to_string()
+                    ))?;
+                Ok(Box::new(OpenAiService::new(api_key)?))
+            }
+            LlmProvider::Anthropic => {
+                let api_key = SETTINGS.llm.anthropic_api_key
+                    .clone()
+                    .filter(|k| !k.is_empty())
+                    .ok_or_else(|| AppError::Configuration(
+                        "Anthropic API key not configured".to_string()
+                    ))?;
+                Ok(Box::new(AnthropicService::new(api_key)?))
+            }
+        }
+    }
+}
+```
+
+## Request/Response Models
+
+```rust
+use serde::{Deserialize, Serialize};
+use validator::Validate;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmProvider {
+    #[default]
+    OpenAI,
+    Anthropic,
+}
+
+#[derive(Debug, Clone, Deserialize, Validate)]
+pub struct TextGenerationRequest {
+    #[validate(length(min = 1))]
+    pub prompt: String,
+    
+    #[serde(default = "default_model")]
+    pub model: String,
+    
+    #[serde(default = "default_max_tokens")]
+    #[validate(range(min = 1, max = 4000))]
+    pub max_tokens: u32,
+    
+    #[serde(default = "default_temperature")]
+    #[validate(range(min = 0.0, max = 2.0))]
+    pub temperature: f32,
+    
+    #[serde(default)]
+    pub provider: LlmProvider,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TextGenerationResponse {
+    pub text: String,
+    pub model: String,
+    pub usage: LlmUsage,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LlmUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: Option<u32>,
+    pub total_tokens: u32,
+}
+```
+
+## Endpoint Implementation
+
+```rust
+#[axum::debug_handler]
+async fn generate_text(
+    headers: HeaderMap,
+    Json(request): Json<TextGenerationRequest>,
+) -> Result<Json<TextGenerationResponse>, AppError> {
+    // Authenticate
+    let user = authenticate(&headers).await?;
+    
+    // Validate
+    use validator::Validate;
+    request.validate().map_err(AppError::from)?;
+    
+    tracing::info!(
+        user_id = %user.id,
+        provider = %request.provider,
+        model = %request.model,
+        "Text generation requested"
+    );
+    
+    // Get service and generate
+    let service = LlmServiceFactory::get_service(request.provider)?;
+    let response = service
+        .generate_text(
+            &request.prompt,
+            &request.model,
+            request.max_tokens,
+            request.temperature,
+        )
+        .await?;
+    
+    tracing::info!(
+        user_id = %user.id,
+        tokens = response.usage.total_tokens,
+        "Text generation completed"
+    );
+    
+    Ok(Json(response))
+}
+```
+
+## Error Handling
+
+Always handle API errors explicitly. Use the shared helper `read_failed_response_text` in `http_error.rs` for non-2xx responses so body-read errors propagate as `AppError::ExternalService` (do not use `unwrap_or_default()` on `response.text().await`).
+
+```rust
+use crate::http_error::read_failed_response_text;
+
+async fn call_openai(&self, url: &str, request: &Request) -> Result<Response, AppError> {
+    let response = self.client
+        .post(url)
+        .json(request)
+        .send()
+        .await
+        .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        let (status, body) = read_failed_response_text(response).await?;
+        return Err(AppError::ExternalService(format!(
+            "API error (status {status}): {body}"
+        )));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))
+}
+```
+
+## Best Practices
+
+1. **Validate inputs** before calling LLM APIs
+2. **Log all requests** with user context
+3. **Handle rate limits** gracefully
+4. **Use appropriate models** for the task
+5. **Set reasonable defaults** for parameters
+6. **Never expose API keys** in responses
+7. **Implement retry strategy** with exponential backoff for transient failures (network errors, 429/503 status codes)
+8. **Configure per-call timeouts** to prevent indefinite hangs (typically 30-60 seconds for LLM requests)
+9. **Estimate and count tokens** client-side before requests to validate against limits and prevent costly overruns

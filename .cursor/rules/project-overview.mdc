@@ -1,35 +1,84 @@
----
-description: Full Stack Vibe Coding Template - Project Overview and Standards
-globs: ["**/*"]
-alwaysApply: true
----
-
 # Vibe Coding Template - Project Standards
 
-This is a modern, modular full-stack application starter template with Next.js frontend and Python FastAPI backend, integrated with Supabase.
+This is a modern, modular full-stack application starter template with Next.js frontend and Rust Axum backend, integrated with Supabase.
+
+## ⚠️ CRITICAL RULES FOR AI ASSISTANTS
+
+Before writing ANY code, you MUST follow these rules:
+
+### FORBIDDEN (Never Do)
+- ❌ Use `any` type in TypeScript
+- ❌ Use `.unwrap()` or `.expect()` in Rust
+- ❌ Use `// @ts-ignore` or `// @ts-nocheck`
+- ❌ Skip input validation
+- ❌ Swallow errors silently
+- ❌ Leave TODO without context
+- ❌ Commit commented-out code
+
+### REQUIRED (Always Do)
+- ✅ Run `cargo check && cargo clippy` for Rust changes
+- ✅ Run `npm run lint` for TypeScript changes
+- ✅ Explicit types on ALL functions
+- ✅ Handle ALL error cases
+- ✅ Log important operations
+- ✅ Follow existing patterns
+
+See `CODE_STANDARDS.md` and `.cursor/rules/ai-guidelines.mdc` for full details.
+
+---
 
 ## Architecture Overview
 
-- **Backend**: Python FastAPI with Supabase integration (auth, database, storage)
+- **Backend**: Rust Axum with Supabase integration (auth, database, storage)
 - **Frontend**: Next.js with Tailwind CSS and TypeScript
 - **Database**: Supabase PostgreSQL with migrations
 - **Vector DB**: Qdrant for semantic search
 - **LLM Integration**: OpenAI and Anthropic support
 
+## Why Rust?
+
+The Rust backend was chosen for maximum guardrails:
+- **Compiler as Guardian** - Catches bugs at compile time
+- **No null pointer exceptions** - Uses `Option<T>` and `Result<T, E>`
+- **Explicit error handling** - Every error must be handled
+- **Type-safe concurrency** - Data races prevented at compile time
+- **No escape hatches** - Unlike TypeScript's `any`, Rust enforces correctness
+
 ## Core Principles
 
-1. **Type Safety First**: Use TypeScript for frontend, Pydantic models for backend
+1. **Type Safety First**: Use TypeScript for frontend, Rust's strong types for backend
 2. **Service Layer Pattern**: Abstract external services (Supabase, LLM, Vector DB)
 3. **Environment-based Configuration**: Use .env files for all configuration
 4. **Docker-first Development**: All services containerized
 5. **Migration-driven Database**: All schema changes through Supabase migrations
+6. **Explicit Error Handling**: All errors handled with proper types
 
 ## File Organization Standards
 
-- Keep related functionality grouped in service directories
-- Use consistent naming: snake_case for Python, camelCase for TypeScript
-- Place shared types and models in dedicated directories
-- Maintain clear separation between API routes and business logic
+### Backend (Rust)
+```
+backend/src/
+├── main.rs           # Entry point
+├── lib.rs            # Library exports
+├── api/              # HTTP handlers
+├── config/           # Configuration
+├── models/           # Data types
+└── services/         # Business logic
+```
+
+### Frontend (TypeScript)
+```
+frontend/
+├── app/              # Next.js app router
+├── components/       # React components
+└── services/         # API clients
+```
+
+## Naming Conventions
+
+- Rust: snake_case for functions/variables, PascalCase for types
+- TypeScript: camelCase for functions/variables, PascalCase for types/components
+- Database: snake_case for tables and columns
 
 ## Development Workflow
 
@@ -40,10 +89,36 @@ This is a modern, modular full-stack application starter template with Next.js f
 
 ## Code Quality Standards
 
-- Always include proper error handling
-- Use async/await patterns consistently
-- Include type annotations for all functions
-- Write descriptive commit messages
-- Test API endpoints before committing
+### Rust Backend
+- No `unsafe` code allowed
+- No `.unwrap()` or `.expect()` - use proper `Result` handling
+- All clippy lints must pass
+- Run `cargo fmt` before committing
+
+### TypeScript Frontend
+- Strict TypeScript mode enabled
+- ESLint rules must pass
+- Prefer async/await over .then() chains
+
+## Error Handling
+
+### Rust
+```rust
+// Use Result<T, AppError> for all fallible operations
+async fn get_user(id: &str) -> Result<User, AppError> {
+    service.get(id).await.map_err(|e| AppError::NotFound(e.to_string()))
+}
+```
+
+### TypeScript
+```typescript
+// Use try/catch with proper error types
+try {
+  const user = await getUser(id)
+} catch (error) {
+  console.error('Failed to get user:', error)
+  throw error
+}
+```
 
 When adding new features, follow the established patterns and maintain consistency with existing code structure.

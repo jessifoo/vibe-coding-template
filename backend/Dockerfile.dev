@@ -1,16 +1,59 @@
-FROM python:3.10-slim
+# Development Dockerfile for Rust Backend
+# Includes cargo-watch for hot reloading
+
+FROM rust:1.83-slim
+
+# Create non-root user for security
+RUN groupadd -g 1000 appuser && \
+    useradd -m -u 1000 -g appuser appuser
 
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install build dependencies and development tools
+# Package versions pinned for reproducible builds
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config=1.8.1-1 \
+    libssl-dev=3.0.13-1~deb12u1 \
+    curl=7.88.1-10+deb12u7 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set environment variables
-ENV PYTHONPATH=/app
+# Set cargo home for non-root user
+ENV CARGO_HOME=/home/appuser/.cargo
+ENV PATH="/home/appuser/.cargo/bin:${PATH}"
 
-# Expose the port the app runs on
+# Install cargo-watch for hot reloading as root
+RUN cargo install cargo-watch
+
+# Copy manifests first for dependency caching
+COPY --chown=appuser:appuser Cargo.toml Cargo.lock* ./
+
+# Create dummy source for dependency compilation
+RUN mkdir src && \
+    echo "fn main() {}" > src/main.rs && \
+    echo "pub fn dummy() {}" > src/lib.rs
+
+# Build dependencies (this layer will be cached)
+RUN cargo build && \
+    rm -rf src
+
+# Ensure ownership of project directories
+RUN chown -R appuser:appuser /app /home/appuser/.cargo
+
+# Source will be mounted via volume in docker-compose
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
 EXPOSE 8000
 
-# Command to run the application with hot-reload
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Set environment defaults
+ENV ENVIRONMENT=development
+ENV HOST=0.0.0.0
+ENV PORT=8000
+ENV RUST_LOG=backend=debug,tower_http=debug,axum=debug
+ENV RUST_BACKTRACE=1
+ENV HOME=/home/appuser
+
+# Run with hot reload using cargo-watch
+CMD ["cargo", "watch", "-x", "run"]

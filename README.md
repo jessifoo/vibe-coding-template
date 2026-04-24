@@ -1,19 +1,30 @@
 # Full Stack Vibe Coding Template
 
-A modern, modular full-stack application starter template with NextJS frontend and Python FastAPI backend, supabase backend for Vibe coding.
+A modern, modular full-stack application starter template with **Next.js frontend** and **Rust Axum backend**, integrated with Supabase for maximum type safety and guardrails.
+
+**Why Rust?** The Rust compiler is the ultimate code reviewer. It catches errors at compile time that other languages only discover in production. No `any` types, no null pointer exceptions, no race conditions - the code either compiles correctly or doesn't compile at all.
 
 Contains all the common boilerplate features. Just add the README.md and CONTEXT.md files to AI coding agent's context.
 
-Dont waste your time and tokens on boilerplate code. Use it to build your app
+Don't waste your time and tokens on boilerplate code. Use it to build your app.
 
-## 🤖 AI-Powered Development
+## 🤖 AI-Powered Development with Maximum Guardrails
 
 This template includes comprehensive **Cursor Rules** and **Agent Instructions** to supercharge your AI-assisted development:
+
+### Why Rust Backend?
+
+- **🛡️ Compiler as Guardian** - The Rust compiler catches bugs before they happen
+- **🔒 No Null Pointer Exceptions** - Uses `Option<T>` and `Result<T, E>` for explicit handling
+- **⚡ Zero-Cost Abstractions** - High-level code with low-level performance
+- **🧵 Fearless Concurrency** - The borrow checker prevents data races at compile time
+- **📝 Self-Documenting Types** - The type system serves as documentation
+- **🚫 No Escape Hatches** - Unlike TypeScript's `any`, Rust forces correctness
 
 ### Cursor Rules (`.cursor/rules/`)
 - **Context-aware guidance** that automatically applies based on the files you're editing
 - **Template system** with production-ready code patterns (`@api-endpoint-template`, `@react-component-template`)
-- **Best practices enforcement** for FastAPI, Next.js, Supabase, and LLM integration
+- **Best practices enforcement** for Axum, Next.js, Supabase, and LLM integration
 - **Automatic rule application** - no manual setup required
 
 ### AGENTS.md
@@ -31,25 +42,26 @@ This template includes comprehensive **Cursor Rules** and **Agent Instructions**
 
 ## Features
 
-### Backend (Python FastAPI)
-- **FastAPI REST API** - Fast, type-checked API development
+### Backend (Rust Axum)
+- **Axum REST API** - Fast, type-safe API development with async/await
+- **Strong Type Safety** - Compiler-enforced correctness
 - **Supabase Integration**
   - Authentication (Google, LinkedIn, Email/Password)
-  - Database connectivity
-  - Realtime subscriptions
+  - Database connectivity via REST API
   - Storage management
   - Database migrations
 - **LLM Integration**
   - OpenAI and Claude support
-  - Abstracted LLM service
+  - Abstracted LLM service traits
   - Vector embeddings service
 - **Vector Database**
   - Qdrant integration
   - Document storage and semantic search
-  - Automatic fallback to local in-memory database
+  - Automatic fallback to local database
 
 ### Frontend (Next.js)
 - **Next.js** - React framework with routing, SSR, and more
+- **TypeScript** - Type-safe frontend development
 - **Tailwind CSS** - Utility-first CSS framework
 - **Responsive design** - Mobile-first approach
 - **Supabase client** - For auth and data access
@@ -61,7 +73,7 @@ This template includes comprehensive **Cursor Rules** and **Agent Instructions**
 - Docker and Docker Compose
 - Make
 - Node.js 18+ (for local frontend development)
-- Python 3.10+ (for local backend development)
+- Rust 1.75+ (for local backend development)
 - Supabase CLI (for database migrations, install with `brew install supabase/tap/supabase` or see [Supabase CLI docs](https://supabase.com/docs/guides/cli))
 
 ### Quick Start
@@ -89,7 +101,7 @@ This template includes comprehensive **Cursor Rules** and **Agent Instructions**
 4. Access the applications:
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:8000
-   - API Documentation: http://localhost:8000/docs
+   - Health Check: http://localhost:8000/
 
 ## Setup Without Script
 
@@ -125,20 +137,23 @@ For detailed instructions on setting up authentication providers (Google, Linked
 /
 ├── .cursor/                  # Cursor AI configuration
 │   └── rules/                # Cursor rules for AI assistance
-│       ├── backend/          # Backend-specific rules
+│       ├── backend/          # Backend-specific rules (Rust/Axum)
 │       ├── frontend/         # Frontend-specific rules
 │       └── templates/        # Code templates
 ├── AGENTS.md                 # AI agent instructions
 │
-├── backend/                  # Python FastAPI application
-│   ├── app/                  # Application code
-│   │   ├── api/              # API endpoints
-│   │   ├── core/             # Core functionality
-│   │   ├── models/           # Data models
+├── backend/                  # Rust Axum application
+│   ├── src/                  # Application source code
+│   │   ├── api/              # API endpoint handlers
+│   │   ├── config/           # Configuration management
+│   │   ├── models/           # Data models (serde)
 │   │   └── services/         # Service layer
 │   │       ├── llm/          # LLM services
 │   │       ├── supabase/     # Supabase services
 │   │       └── vectordb/     # Vector DB services
+│   ├── Cargo.toml            # Rust dependencies
+│   ├── Dockerfile            # Production container
+│   └── Dockerfile.dev        # Development container
 │
 ├── frontend/                 # Next.js application
 │   ├── app/                  # Next.js app directory
@@ -150,7 +165,6 @@ For detailed instructions on setting up authentication providers (Google, Linked
 │   ├── seed.sql              # Database seed data
 │   └── README.md             # Migrations documentation
 │
-├── llm-context/              # Legacy context files (now replaced by Cursor rules)
 ├── docker-compose.yml        # Docker configuration
 ├── Makefile                  # Project commands
 ├── first-time.sh             # Setup script
@@ -167,6 +181,14 @@ For detailed instructions on setting up authentication providers (Google, Linked
 - Start all services: `make dev`
 - Frontend only: `make dev-frontend`
 - Backend only: `make dev-backend`
+
+### Backend Development (Rust)
+
+- Build release: `make build-backend`
+- Run tests: `make test-backend`
+- Run linter: `make lint-backend`
+- Check compilation: `make check-backend`
+- Format code: `make fmt-backend`
 
 ### Production
 
@@ -195,7 +217,7 @@ The project includes comprehensive Cursor rules that automatically provide conte
 
 - **Automatic Application**: Rules apply automatically based on the files you're editing
 - **Template Usage**: Reference templates with `@api-endpoint-template`, `@react-component-template`, `@service-class-template`
-- **Best Practices**: Built-in patterns for FastAPI, Next.js, Supabase, and LLM integration
+- **Best Practices**: Built-in patterns for Axum, Next.js, Supabase, and LLM integration
 
 ### Using AGENTS.md
 For simpler AI assistance, use the consolidated `AGENTS.md` file that provides:
@@ -203,20 +225,54 @@ For simpler AI assistance, use the consolidated `AGENTS.md` file that provides:
 - Common patterns and examples
 - Development standards and workflows
 
+## API Endpoints
+
+### Health Check
+- `GET /` - Returns server status
+
+### Authentication (`/api/auth`)
+- `GET /api/auth/me` - Get current user profile
+- `POST /api/auth/provider-token` - Exchange provider token for Supabase token
+
+### LLM (`/api/llm`)
+- `POST /api/llm/generate` - Generate text with OpenAI/Anthropic
+- `POST /api/llm/embedding` - Create text embedding
+
+### Vector Database (`/api/vectordb`)
+- `POST /api/vectordb/documents` - Add documents to vector DB
+- `POST /api/vectordb/search` - Semantic search
+- `DELETE /api/vectordb/documents` - Delete documents
+
 ## Documentation
 
-- [Cursor Rules Guide](./.cursor/rules/README.md)
-- [AI Agent Instructions](./AGENTS.md)
+### Guidelines & Standards
+- [Code Standards](./CODE_STANDARDS.md) - Comprehensive coding standards
+- [AI Agent Instructions](./AGENTS.md) - Guidelines for AI coding assistants
+- [Cursor Rules Guide](./.cursor/rules/README.md) - Context-aware AI rules
+
+### Project Docs
 - [Authentication Setup Guide](./AuthSetup.md)
 - [Database Migrations](./supabase/README.md)
 - [Project Changelog](./CHANGELOG.md)
 - [Future Improvements](./FutureImprovements.md)
 
-### Legacy Documentation (replaced by Cursor rules)
-- [Backend Context](./llm-context/BACKEND-CONTEXT.md)
-- [Frontend Context](./llm-context/FRONTEND-CONTEXT.md)
-- [Database Migrations Context](./llm-context/DB-MIGRATIONS.md)
-- [Supabase SDK Reference](./llm-context/SUPABASE-CLIENT-SDK.md)
+## Linting & Formatting
+
+### Backend (Rust)
+```bash
+cd backend
+cargo check      # Quick compilation check
+cargo clippy     # Linting (must pass with no warnings)
+cargo fmt        # Format code
+cargo test       # Run tests
+```
+
+### Frontend (TypeScript)
+```bash
+cd frontend
+npm run lint     # ESLint (must pass)
+npm run build    # Type check + build
+```
 
 ## License
 

@@ -2,14 +2,23 @@
 
 This directory contains Cursor rules that provide context-aware guidance for developing with the Vibe Coding Template. These rules help maintain consistency, follow best practices, and accelerate development.
 
+## ⚠️ AI Guidelines
+
+The most important file for AI assistants is **`ai-guidelines.mdc`** which contains:
+- Forbidden practices (things AI must NEVER do)
+- Required practices (things AI must ALWAYS do)
+- Pre-commit checklists
+- Code review criteria
+
 ## Rule Structure
 
 ### Project-wide Rules
 - **`project-overview.mdc`**: Overall project standards and architecture principles (always applied)
+- **`ai-guidelines.mdc`**: AI-specific coding rules and guardrails (always applied)
 - **`development-workflow.mdc`**: Development workflow, commands, and troubleshooting
 
 ### Backend Rules (`backend/`)
-- **`fastapi-standards.mdc`**: FastAPI endpoint patterns and best practices
+- **`axum-standards.mdc`**: Rust Axum endpoint patterns and best practices
 - **`supabase-integration.mdc`**: Supabase service usage and patterns
 - **`llm-integration.mdc`**: LLM and embedding service integration
 
@@ -22,7 +31,7 @@ This directory contains Cursor rules that provide context-aware guidance for dev
 - **`database-migrations.mdc`**: Migration patterns and SQL best practices
 
 ### Templates (`templates/`)
-- **`api-endpoint-template.mdc`**: Complete FastAPI endpoint template
+- **`api-endpoint-template.mdc`**: Complete Rust Axum endpoint template
 - **`react-component-template.mdc`**: Complete React component template
 - **`service-class-template.mdc`**: Service class pattern template
 
@@ -38,13 +47,13 @@ Rules are automatically applied based on:
 
 ### Automatic Application
 Rules automatically provide context when you're working with relevant files:
-- Editing Python files in `backend/` → Backend rules apply
+- Editing Rust files in `backend/` → Backend rules apply
 - Editing React components → Frontend rules apply
 - Working with migrations → Database rules apply
 
 ### Manual Reference
 Reference templates explicitly:
-- `@api-endpoint-template` - Get the FastAPI endpoint template
+- `@api-endpoint-template` - Get the Rust Axum endpoint template
 - `@react-component-template` - Get the React component template
 - `@service-class-template` - Get the service class template
 
