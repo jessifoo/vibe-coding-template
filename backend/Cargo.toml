@@ -66,6 +66,9 @@ once_cell = "1.19"
 [dev-dependencies]
 parking_lot = "0.12"
 tokio-test = "0.4"
+# `tower::util::ServiceExt` (`oneshot`) is used by integration tests to drive
+# the Axum router without binding a TCP port.
+tower = { version = "0.4", features = ["util"] }
 
 [profile.release]
 lto = true
