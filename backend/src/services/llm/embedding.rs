@@ -3,6 +3,7 @@
 //! Currently supports OpenAI embeddings. Anthropic placeholder included for future support.
 
 use crate::config::SETTINGS;
+use crate::http_error::read_failed_response_text;
 use crate::models::{AppError, EmbeddingResponse, LlmProvider, LlmUsage};
 use async_trait::async_trait;
 use reqwest::Client;
@@ -99,10 +100,9 @@ impl EmbeddingService for OpenAiEmbeddingService {
             })?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "OpenAI embedding API error (status {status}): {error}"
+                "OpenAI embedding API error (status {status}): {body}"
             )));
         }
 

@@ -3,6 +3,7 @@
 //! Supports OpenAI and Anthropic for text generation with a unified interface.
 
 use crate::config::SETTINGS;
+use crate::http_error::read_failed_response_text;
 use crate::models::{AppError, LlmProvider, LlmUsage, TextGenerationResponse};
 use async_trait::async_trait;
 use reqwest::Client;
@@ -124,10 +125,9 @@ impl LlmService for OpenAiService {
             .map_err(|e| AppError::ExternalService(format!("OpenAI request failed: {e}")))?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "OpenAI API error (status {status}): {error}"
+                "OpenAI API error (status {status}): {body}"
             )));
         }
 
@@ -241,10 +241,9 @@ impl LlmService for AnthropicService {
             .map_err(|e| AppError::ExternalService(format!("Anthropic request failed: {e}")))?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "Anthropic API error (status {status}): {error}"
+                "Anthropic API error (status {status}): {body}"
             )));
         }
 

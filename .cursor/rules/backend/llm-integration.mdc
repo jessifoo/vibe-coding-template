@@ -27,6 +27,8 @@ pub trait LlmService: Send + Sync {
 
 ### OpenAI
 ```rust
+use crate::http_error::read_failed_response_text;
+
 pub struct OpenAiService {
     client: Client,
     api_key: String,
@@ -85,10 +87,9 @@ impl LlmService for OpenAiService {
             .map_err(|e| AppError::ExternalService(e.to_string()))?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "OpenAI API error (status {status}): {error}"
+                "OpenAI API error (status {status}): {body}"
             )));
         }
 
@@ -111,6 +112,8 @@ impl LlmService for OpenAiService {
 ### Anthropic
 ```rust
 use std::time::Duration;
+
+use crate::http_error::read_failed_response_text;
 
 pub struct AnthropicService {
     client: Client,
@@ -171,10 +174,9 @@ impl LlmService for AnthropicService {
             .map_err(|e| AppError::ExternalService(e.to_string()))?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "Anthropic API error (status {status}): {error}"
+                "Anthropic API error (status {status}): {body}"
             )));
         }
 
@@ -321,9 +323,11 @@ async fn generate_text(
 
 ## Error Handling
 
-Always handle API errors explicitly:
+Always handle API errors explicitly. Use the shared helper `read_failed_response_text` in `http_error.rs` for non-2xx responses so body-read errors propagate as `AppError::ExternalService` (do not use `unwrap_or_default()` on `response.text().await`).
 
 ```rust
+use crate::http_error::read_failed_response_text;
+
 async fn call_openai(&self, url: &str, request: &Request) -> Result<Response, AppError> {
     let response = self.client
         .post(url)
@@ -333,11 +337,9 @@ async fn call_openai(&self, url: &str, request: &Request) -> Result<Response, Ap
         .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
 
     if !response.status().is_success() {
-        let status = response.status();
-        let error = response.text().await
-            .map_err(|e| AppError::ExternalService(format!("Failed to read error body (status {status}): {e}")))?;
+        let (status, body) = read_failed_response_text(response).await?;
         return Err(AppError::ExternalService(format!(
-            "API error (status {status}): {error}"
+            "API error (status {status}): {body}"
         )));
     }
 

@@ -4,6 +4,7 @@
 
 use crate::config::SETTINGS;
 use crate::http_auth::bearer_token_from_value;
+use crate::http_error::read_failed_response_text;
 use crate::models::{AppError, SupabaseUser, UserProfile};
 use reqwest::Client;
 use serde::Deserialize;
@@ -57,10 +58,9 @@ impl SupabaseAuthService {
             .map_err(|e| AppError::ExternalService(format!("Supabase request failed: {e}")))?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::Unauthorized(format!(
-                "Invalid token (status: {status}): {error_text}"
+                "Invalid token (status: {status}): {body}"
             )));
         }
 
@@ -112,9 +112,9 @@ impl SupabaseAuthService {
             })?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::BadRequest(format!(
-                "Failed to authenticate with {provider}: {error_text}"
+                "Failed to authenticate with {provider} (status {status}): {body}"
             )));
         }
 

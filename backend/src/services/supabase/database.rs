@@ -3,6 +3,7 @@
 //! Generic CRUD operations for Supabase PostgreSQL database via REST API.
 
 use crate::config::SETTINGS;
+use crate::http_error::read_failed_response_text;
 use crate::models::AppError;
 use reqwest::Client;
 use serde::{de::DeserializeOwned, Serialize};
@@ -10,11 +11,7 @@ use std::collections::HashMap;
 
 /// Reject table names with characters unsafe for path segments (injection, traversal).
 fn validate_table_name(table: &str) -> Result<(), AppError> {
-    if table.is_empty()
-        || !table
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if table.is_empty() || !table.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(AppError::BadRequest(format!(
             "Invalid table name (use letters, digits, underscore only): {table}"
         )));
@@ -102,9 +99,9 @@ impl SupabaseDatabaseService {
             .map_err(|e| AppError::ExternalService(format!("Database query failed: {e}")))?;
 
         if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "Database query failed: {error}"
+                "Database query failed (status {status}): {body}"
             )));
         }
 
@@ -152,9 +149,9 @@ impl SupabaseDatabaseService {
         }
 
         if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "Database query failed: {error}"
+                "Database query failed (status {status}): {body}"
             )));
         }
 
@@ -196,9 +193,9 @@ impl SupabaseDatabaseService {
             .map_err(|e| AppError::ExternalService(format!("Database insert failed: {e}")))?;
 
         if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "Database insert failed: {error}"
+                "Database insert failed (status {status}): {body}"
             )));
         }
 
@@ -250,9 +247,9 @@ impl SupabaseDatabaseService {
             .map_err(|e| AppError::ExternalService(format!("Database update failed: {e}")))?;
 
         if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "Database update failed: {error}"
+                "Database update failed (status {status}): {body}"
             )));
         }
 
@@ -294,9 +291,9 @@ impl SupabaseDatabaseService {
             .map_err(|e| AppError::ExternalService(format!("Database delete failed: {e}")))?;
 
         if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "Database delete failed: {error}"
+                "Database delete failed (status {status}): {body}"
             )));
         }
 

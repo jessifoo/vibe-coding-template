@@ -3,6 +3,7 @@
 //! Handles file uploads and management via Supabase Storage.
 
 use crate::config::SETTINGS;
+use crate::http_error::read_failed_response_text;
 use crate::models::AppError;
 use reqwest::Client;
 use serde::Deserialize;
@@ -87,11 +88,11 @@ impl SupabaseStorageService {
             .map_err(|e| AppError::ExternalService(format!("Failed to create bucket: {e}")))?;
 
         if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+            let (_status, body) = read_failed_response_text(response).await?;
             // Ignore "already exists" errors
-            if !error.contains("already exists") {
+            if !body.contains("already exists") {
                 return Err(AppError::ExternalService(format!(
-                    "Failed to create bucket: {error}"
+                    "Failed to create bucket: {body}"
                 )));
             }
         }
@@ -126,7 +127,9 @@ impl SupabaseStorageService {
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| {
-                AppError::BadRequest("Invalid or empty filename (path segments not allowed)".to_string())
+                AppError::BadRequest(
+                    "Invalid or empty filename (path segments not allowed)".to_string(),
+                )
             })?;
         // Generate unique object key (no user-controlled path segments in the basename)
         let unique_filename = format!("{}-{}", Uuid::new_v4(), safe_name);
@@ -138,7 +141,8 @@ impl SupabaseStorageService {
             }
             Some(p) => {
                 // URL-encode each path segment individually
-                let encoded_segments: Vec<String> = p.split('/')
+                let encoded_segments: Vec<String> = p
+                    .split('/')
                     .map(|seg| urlencoding::encode(seg).into_owned())
                     .collect();
                 let encoded_path = encoded_segments.join("/");
@@ -166,9 +170,9 @@ impl SupabaseStorageService {
             .map_err(|e| AppError::ExternalService(format!("File upload failed: {e}")))?;
 
         if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "File upload failed: {error}"
+                "File upload failed (status {status}): {body}"
             )));
         }
 
@@ -201,7 +205,9 @@ impl SupabaseStorageService {
     pub async fn delete_file(&self, path: &str) -> Result<bool, AppError> {
         // Validate path
         if path.is_empty() {
-            return Err(AppError::BadRequest("File path cannot be empty".to_string()));
+            return Err(AppError::BadRequest(
+                "File path cannot be empty".to_string(),
+            ));
         }
         if path.contains("..") || path.starts_with('/') {
             return Err(AppError::BadRequest(
@@ -210,7 +216,8 @@ impl SupabaseStorageService {
         }
 
         // URL-encode each path segment
-        let encoded_segments: Vec<String> = path.split('/')
+        let encoded_segments: Vec<String> = path
+            .split('/')
             .map(|seg| urlencoding::encode(seg).into_owned())
             .collect();
         let encoded_path = encoded_segments.join("/");
@@ -264,9 +271,9 @@ impl SupabaseStorageService {
             .map_err(|e| AppError::ExternalService(format!("Failed to list files: {e}")))?;
 
         if !response.status().is_success() {
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "Failed to list files: {error}"
+                "Failed to list files (status {status}): {body}"
             )));
         }
 
