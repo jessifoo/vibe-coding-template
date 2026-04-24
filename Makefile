@@ -1,7 +1,7 @@
 .PHONY: dev dev-frontend dev-backend prod prod-frontend prod-backend clean help
 .PHONY: logs stop prod-logs prod-stop
 .PHONY: db-migration-new db-apply db-list db-push db-status
-.PHONY: install-frontend build-frontend install-backend build-backend test-backend lint-backend check-backend fmt-backend ci ci-full lint-frontend test-frontend
+.PHONY: install-frontend build-frontend install-backend build-backend test-backend lint-backend check-backend fmt-backend ci ci-full lint-frontend test-frontend verify-tracked
 
 # Default target
 .DEFAULT_GOAL := help
@@ -136,6 +136,18 @@ ci: lint-backend test-backend ## Run backend CI (lint + test)
 
 ci-full: lint-backend test-backend lint-frontend test-frontend ## Run full-stack CI
 	@echo "${GREEN}Full CI checks passed!${NC}"
+
+# Fail if build artifacts or dependencies were accidentally `git add`ed
+verify-tracked: ## Ensure git does not track node_modules, target/, .next, etc.
+	@bad=$$(git ls-files | grep -E 'node_modules/|/target/|/\.next/|__pycache__/|(^|/)\.env$$|(^|/)\.env\.(local|development|test|production)' || true); \
+	if [ -n "$$bad" ]; then \
+		echo "${RED}These paths are tracked but must stay ignored (see .gitignore):${NC}"; \
+		echo "$$bad"; \
+		echo "Run: git rm -r --cached <path>   # then commit"; \
+		exit 1; \
+	fi; \
+	n=$$(git ls-files | wc -l); \
+	echo "${GREEN}verify-tracked: OK ($${n} files).${NC}"
 
 # Help command
 help: ## Show this help
