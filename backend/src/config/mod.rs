@@ -3,16 +3,24 @@
 //! Handles loading and validating all environment variables and configuration
 //! settings. Uses strong typing to prevent misconfiguration at runtime.
 
-use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::env;
 use std::fmt;
+use std::sync::LazyLock;
 
 /// Global application settings, loaded once at startup.
-pub static SETTINGS: Lazy<Settings> = Lazy::new(|| {
+///
+/// # Panics
+///
+/// Panics if required environment variables (`SUPABASE_URL`,
+/// `SUPABASE_SERVICE_KEY`) are missing or invalid. This is intentional:
+/// the process cannot meaningfully serve traffic without valid settings,
+/// and the panic surfaces during startup rather than per request.
+#[allow(clippy::expect_used)]
+pub static SETTINGS: LazyLock<Settings> = LazyLock::new(|| {
     Settings::from_env().unwrap_or_else(|e| {
-        eprintln!("Failed to load settings: {}", e);
-        panic!("Failed to load settings: {}", e);
+        eprintln!("Failed to load settings: {e}");
+        panic!("Failed to load settings: {e}");
     })
 });
 
