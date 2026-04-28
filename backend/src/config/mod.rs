@@ -264,14 +264,18 @@ impl Settings {
             .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_URL".to_string()))?;
         let supabase_url = supabase_url.trim().to_string();
         if supabase_url.is_empty() {
-            return Err(SettingsError::InvalidValue("SUPABASE_URL cannot be empty or whitespace".to_string()));
+            return Err(SettingsError::InvalidValue(
+                "SUPABASE_URL cannot be empty or whitespace".to_string(),
+            ));
         }
 
         let supabase_service_key = env::var("SUPABASE_SERVICE_KEY")
             .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_SERVICE_KEY".to_string()))?;
         let supabase_service_key = supabase_service_key.trim().to_string();
         if supabase_service_key.is_empty() {
-            return Err(SettingsError::InvalidValue("SUPABASE_SERVICE_KEY cannot be empty or whitespace".to_string()));
+            return Err(SettingsError::InvalidValue(
+                "SUPABASE_SERVICE_KEY cannot be empty or whitespace".to_string(),
+            ));
         }
 
         let supabase = SupabaseConfig {
