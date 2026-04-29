@@ -16,7 +16,6 @@ use std::sync::LazyLock;
 /// `SUPABASE_SERVICE_KEY`) are missing or invalid. This is intentional:
 /// the process cannot meaningfully serve traffic without valid settings,
 /// and the panic surfaces during startup rather than per request.
-#[allow(clippy::expect_used)]
 pub static SETTINGS: LazyLock<Settings> = LazyLock::new(|| {
     Settings::from_env().unwrap_or_else(|e| {
         eprintln!("Failed to load settings: {e}");

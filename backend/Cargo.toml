@@ -3,7 +3,7 @@ name = "backend"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Full-stack application backend with Axum, Supabase, and LLM integration"
+description = "Full-stack application backend with Axum 0.8, Supabase, and LLM integration (Rust 2024 edition, MSRV 1.85)"
 license = "MIT"
 
 [dependencies]
