@@ -18,7 +18,10 @@ fn validate_trim_non_empty(s: &str) -> Result<(), ValidationError> {
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct Document {
     /// Document text content
-    #[validate(custom(function = "validate_trim_non_empty", message = "Document text cannot be empty or whitespace only"))]
+    #[validate(custom(
+        function = "validate_trim_non_empty",
+        message = "Document text cannot be empty or whitespace only"
+    ))]
     pub text: String,
 
     /// Optional document title
@@ -58,7 +61,10 @@ pub struct DocumentUploadResponse {
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct SearchQuery {
     /// Text to search for
-    #[validate(custom(function = "validate_trim_non_empty", message = "Query text cannot be empty or whitespace only"))]
+    #[validate(custom(
+        function = "validate_trim_non_empty",
+        message = "Query text cannot be empty or whitespace only"
+    ))]
     pub query_text: String,
 
     /// Embedding model to use

@@ -114,11 +114,12 @@ pub async fn run() -> Result<(), AppRunError> {
 
     let app = build_app().await?;
     let bind_address = format!("{}:{}", SETTINGS.server.host, SETTINGS.server.port);
-    let addr: SocketAddr = bind_address.parse()
-        .map_err(|e| std::io::Error::new(
+    let addr: SocketAddr = bind_address.parse().map_err(|e| {
+        std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("Invalid bind address '{}': {}", bind_address, e)
-        ))?;
+            format!("Invalid bind address '{}': {}", bind_address, e),
+        )
+    })?;
 
     tracing::info!(
         address = %addr,
