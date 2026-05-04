@@ -94,17 +94,6 @@ else
   print_message "Docker is installed."
 fi
 
-# Check for Make
-if ! command -v make &> /dev/null; then
-  print_error "Make not found. Make is required to run this project."
-  print_message "Please install Make:"
-  print_message "  - macOS: xcode-select --install"
-  print_message "  - Ubuntu/Debian: sudo apt-get install build-essential"
-  print_message "  - Fedora/RHEL: sudo dnf install make"
-  exit 1
-fi
-print_message "Make is installed."
-
 # Check for Node.js
 if ! command -v node &> /dev/null; then
   print_warning "Node.js not found. Frontend development might be limited."
@@ -119,6 +108,7 @@ if ! command -v make &> /dev/null; then
   print_warning "Make not found. The 'make dev' / 'make prod' workflow won't work."
   print_message "Install GNU Make:"
   echo -e "  ${GREEN}sudo apt-get install build-essential${NC}  (Debian/Ubuntu)"
+  echo -e "  ${GREEN}sudo dnf install make${NC}                 (Fedora/RHEL)"
   echo -e "  ${GREEN}xcode-select --install${NC}                (macOS)"
 else
   make_version=$(make --version | head -n 1)
