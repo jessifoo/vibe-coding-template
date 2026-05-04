@@ -335,10 +335,12 @@ The cloud agent VM ships with the toolchain already installed:
   `rust-version = "1.75"` MSRV declared in `backend/Cargo.toml`).
 - **Node.js 22** + `npm` symlinked into `/usr/local/bin` for the `root` user.
 - **`cargo-watch`** pre-installed for `make dev` / `cargo watch -x run`.
-- System libs needed for the build: `build-essential`, `pkg-config`, `libssl3`,
-  `openssl`. The backend uses `reqwest` with `rustls-tls`, so `libssl-dev` is
-  not required, but `libssl3` is needed at runtime for the crates that link
-  OpenSSL transitively.
+- System libs needed for the build: `build-essential` and `pkg-config`. The
+  backend uses `reqwest` with `default-features = false` + `rustls-tls`, so
+  neither `libssl-dev` nor `libssl3` is required — `ldd target/debug/backend`
+  on the cloud VM links only `libgcc_s`, `libm`, `libc`, and `ld-linux`. If
+  you ever switch `reqwest`/`qdrant-client` to a native-tls backend, you will
+  need to add `libssl-dev` (build) and `libssl3` (runtime).
 
 ### Running services natively (without Docker)
 
