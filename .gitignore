@@ -13,6 +13,9 @@ node_modules/
 .pnp
 .pnp.js
 
+# Compiled shared libraries (language-agnostic; e.g. native modules, FFI helpers)
+*.so
+
 # Build outputs
 dist/
 build/
