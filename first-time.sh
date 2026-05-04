@@ -114,6 +114,17 @@ else
   print_message "Node.js is installed (${node_version})."
 fi
 
+# Check for Make (the documented `make dev` workflow needs it)
+if ! command -v make &> /dev/null; then
+  print_warning "Make not found. The 'make dev' / 'make prod' workflow won't work."
+  print_message "Install GNU Make:"
+  echo -e "  ${GREEN}sudo apt-get install build-essential${NC}  (Debian/Ubuntu)"
+  echo -e "  ${GREEN}xcode-select --install${NC}                (macOS)"
+else
+  make_version=$(make --version | head -n 1)
+  print_message "Make is installed (${make_version})."
+fi
+
 # Check for Rust toolchain (cargo and rustc are separate binaries; both are required)
 missing_rust_tools=()
 if ! command -v cargo &> /dev/null; then
