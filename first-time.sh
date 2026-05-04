@@ -103,13 +103,21 @@ else
   print_message "Node.js is installed (${node_version})."
 fi
 
-# Check for Rust toolchain
+# Check for Rust toolchain (cargo and rustc are separate binaries; both are required)
+missing_rust_tools=()
 if ! command -v cargo &> /dev/null; then
-  print_warning "Rust (cargo) not found. Backend development might be limited."
-  print_message "Please install Rust from https://rustup.rs/"
+  missing_rust_tools+=("cargo")
+fi
+if ! command -v rustc &> /dev/null; then
+  missing_rust_tools+=("rustc")
+fi
+if [ ${#missing_rust_tools[@]} -gt 0 ]; then
+  print_warning "Rust toolchain incomplete (missing: ${missing_rust_tools[*]}). Backend development might be limited."
+  print_message "Please install Rust from https://rustup.rs/ (rustup installs both cargo and rustc)."
 else
-  rust_version=$(rustc --version)
-  print_message "Rust is installed (${rust_version})."
+  cargo_version=$(cargo --version)
+  rustc_version=$(rustc --version)
+  print_message "Rust is installed (${rustc_version}, ${cargo_version})."
 fi
 
 # Set up Supabase
