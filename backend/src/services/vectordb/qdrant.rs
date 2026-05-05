@@ -169,7 +169,9 @@ impl QdrantService {
                         for (key, value) in meta {
                             payload.insert(
                                 key.clone(),
-                                qdrant_client::qdrant::Value::from(value.to_string()),
+                                qdrant_client::qdrant::Value::from(
+                                    qdrant_payload_string_from_json(value),
+                                ),
                             );
                         }
                     }
@@ -356,6 +358,13 @@ fn extract_string_value(value: &qdrant_client::qdrant::Value) -> Option<String> 
     }
 }
 
+fn qdrant_payload_string_from_json(value: &JsonValue) -> String {
+    match value {
+        JsonValue::String(value) => value.clone(),
+        _ => value.to_string(),
+    }
+}
+
 fn build_owner_scoped_delete_filter(ids: &[String], owner_id: &str) -> Filter {
     Filter::must([
         Condition::has_id(ids.iter().cloned()),
@@ -365,8 +374,11 @@ fn build_owner_scoped_delete_filter(ids: &[String], owner_id: &str) -> Filter {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_owner_scoped_delete_filter, OWNER_ID_METADATA_KEY};
+    use super::{
+        build_owner_scoped_delete_filter, qdrant_payload_string_from_json, OWNER_ID_METADATA_KEY,
+    };
     use qdrant_client::qdrant::{condition::ConditionOneOf, r#match::MatchValue};
+    use serde_json::Value as JsonValue;
 
     #[test]
     fn delete_filter_always_includes_owner_scope() {
@@ -394,5 +406,12 @@ mod tests {
             MatchValue::Text(value) => assert_eq!(value, "user-123"),
             _ => panic!("owner match should be a string-based match"),
         }
+    }
+
+    #[test]
+    fn string_metadata_is_stored_without_json_quotes() {
+        let stored = qdrant_payload_string_from_json(&JsonValue::String("user-123".to_string()));
+
+        assert_eq!(stored, "user-123");
     }
 }
