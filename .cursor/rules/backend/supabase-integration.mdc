@@ -1,100 +1,326 @@
----
-description: Supabase Integration Patterns and Best Practices
-globs: ["backend/app/services/supabase/**/*.py", "backend/app/api/endpoints/**/*.py"]
-alwaysApply: false
----
+# Supabase Integration Standards (Rust)
 
-# Supabase Integration Standards
+> Apply these standards when working with Supabase services in the Rust backend.
 
-## Database Service Usage
+## Service Architecture
 
-Use the generic `SupabaseDatabaseService` for all database operations:
+Supabase services use REST API calls with proper error handling:
 
-```python
-from app.services.supabase.database import SupabaseDatabaseService
-from app.models.your_model import YourModel
+### Authentication Service
 
-# Initialize service
-service = SupabaseDatabaseService("table_name", YourModel)
+```rust
+use reqwest::Client;
+use crate::config::SETTINGS;
+use crate::models::{AppError, UserProfile, SupabaseUser};
 
-# CRUD operations
-items = await service.list(filters={"status": "active"})
-item = await service.get("item_id")
-new_item = await service.create({"name": "New Item"})
-updated_item = await service.update("item_id", {"name": "Updated"})
-success = await service.delete("item_id")
+#[derive(Clone)]
+pub struct SupabaseAuthService {
+    client: Client,
+    supabase_url: String,
+    service_key: String,
+}
+
+impl SupabaseAuthService {
+    pub fn new() -> Result<Self, AppError> {
+        let client = Client::builder()
+            .build()
+            .map_err(|e| AppError::Configuration(e.to_string()))?;
+        
+        Ok(Self {
+            client,
+            supabase_url: SETTINGS.supabase.url.clone(),
+            service_key: SETTINGS.supabase.service_key.clone(),
+        })
+    }
+    
+    pub async fn get_user(&self, jwt_token: &str) -> Result<UserProfile, AppError> {
+        let url = format!("{}/auth/v1/user", self.supabase_url);
+        
+        let response = self.client
+            .get(&url)
+            .header("Authorization", format!("Bearer {jwt_token}"))
+            .header("apikey", &self.service_key)
+            .send()
+            .await
+            .map_err(|e| AppError::ExternalService(e.to_string()))?;
+        
+        if !response.status().is_success() {
+            return Err(AppError::Unauthorized("Invalid token".to_string()));
+        }
+        
+        let user: SupabaseUser = response
+            .json()
+            .await
+            .map_err(|e| AppError::ExternalService(e.to_string()))?;
+        
+        Ok(user.into())
+    }
+}
 ```
 
-## Authentication Service
+### Database Service
 
-Use the centralized auth service for user management:
+```rust
+use serde::{de::DeserializeOwned, Serialize};
+use std::collections::HashMap;
 
-```python
-from app.services.supabase.auth import SupabaseAuthService
+#[derive(Clone)]
+pub struct SupabaseDatabaseService {
+    client: Client,
+    base_url: String,
+    service_key: String,
+}
 
-auth_service = SupabaseAuthService()
+impl SupabaseDatabaseService {
+    pub fn new() -> Result<Self, AppError> {
+        Ok(Self {
+            client: Client::builder().build()?,
+            base_url: format!("{}/rest/v1", SETTINGS.supabase.url),
+            service_key: SETTINGS.supabase.service_key.clone(),
+        })
+    }
+    
+    /// List records with optional filters.
+    pub async fn list<T: DeserializeOwned>(
+        &self,
+        table: &str,
+        filters: Option<&HashMap<String, String>>,
+    ) -> Result<Vec<T>, AppError> {
+        let mut url = format!("{}/{}?select=*", self.base_url, table);
+        
+        if let Some(filters) = filters {
+            for (key, value) in filters {
+                url.push_str(&format!("&{key}=eq.{value}"));
+            }
+        }
+        
+        let response = self.client
+            .get(&url)
+            .header("apikey", &self.service_key)
+            .header("Authorization", format!("Bearer {}", self.service_key))
+            .send()
+            .await?;
+        
+        if !response.status().is_success() {
+            let status = response.status();
+            let error = response.text().await
+                .map_err(|e| AppError::ExternalService(format!("Failed to read error body (status {status}): {e}")))?;
+            return Err(AppError::ExternalService(format!(
+                "Request failed (status {status}): {error}"
+            )));
+        }
 
-# Get user from token
-user = await auth_service.get_user_from_token(token)
-
-# Exchange provider token
-result = await auth_service.exchange_provider_token("google", provider_token)
+        response.json().await.map_err(Into::into)
+    }
+    
+    /// Create a new record.
+    pub async fn create<T: DeserializeOwned, D: Serialize>(
+        &self,
+        table: &str,
+        data: &D,
+    ) -> Result<T, AppError> {
+        let url = format!("{}/{}", self.base_url, table);
+        
+        let response = self.client
+            .post(&url)
+            .header("apikey", &self.service_key)
+            .header("Authorization", format!("Bearer {}", self.service_key))
+            .header("Prefer", "return=representation")
+            .json(data)
+            .send()
+            .await?;
+        
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(error));
+        }
+        
+        let mut records: Vec<T> = response.json().await?;
+        records.pop().ok_or_else(|| {
+            AppError::ExternalService("Insert returned no data".to_string())
+        })
+    }
+    
+    /// Update a record.
+    pub async fn update<T: DeserializeOwned, D: Serialize>(
+        &self,
+        table: &str,
+        id: &str,
+        data: &D,
+    ) -> Result<T, AppError> {
+        let url = format!("{}/{}?id=eq.{}", self.base_url, table, id);
+        
+        let response = self.client
+            .patch(&url)
+            .header("apikey", &self.service_key)
+            .header("Authorization", format!("Bearer {}", self.service_key))
+            .header("Prefer", "return=representation")
+            .json(data)
+            .send()
+            .await?;
+        
+        if !response.status().is_success() {
+            let error = response.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(error));
+        }
+        
+        let mut records: Vec<T> = response.json().await?;
+        records.pop().ok_or_else(|| {
+            AppError::NotFound(format!("Record {id} not found"))
+        })
+    }
+    
+    /// Delete a record.
+    pub async fn delete(&self, table: &str, id: &str) -> Result<bool, AppError> {
+        let url = format!("{}/{}?id=eq.{}", self.base_url, table, id);
+        
+        let response = self.client
+            .delete(&url)
+            .header("apikey", &self.service_key)
+            .header("Authorization", format!("Bearer {}", self.service_key))
+            .send()
+            .await?;
+        
+        Ok(response.status().is_success())
+    }
+}
 ```
 
-## Storage Service
+### Storage Service
 
-Use the storage service for file operations:
+```rust
+#[derive(Clone)]
+pub struct SupabaseStorageService {
+    client: Client,
+    base_url: String,
+    service_key: String,
+    bucket_name: String,
+}
 
-```python
-from app.services.supabase.storage import SupabaseStorageService
-
-storage_service = SupabaseStorageService("bucket_name")
-
-# Upload file
-public_url = await storage_service.upload_file(file, "path/to/file")
-
-# Get public URL
-url = storage_service.get_public_url("path/to/file")
-
-# Delete file
-success = storage_service.delete_file("path/to/file")
+impl SupabaseStorageService {
+    pub fn new(bucket_name: &str) -> Result<Self, AppError> {
+        Ok(Self {
+            client: Client::builder().build()?,
+            base_url: format!("{}/storage/v1", SETTINGS.supabase.url),
+            service_key: SETTINGS.supabase.service_key.clone(),
+            bucket_name: bucket_name.to_string(),
+        })
+    }
+    
+    pub async fn upload_file(
+        &self,
+        filename: &str,
+        content: Vec<u8>,
+        content_type: &str,
+    ) -> Result<String, AppError> {
+        use std::path::Path;
+        let safe_name = Path::new(filename)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| AppError::BadRequest("Invalid filename".to_string()))?;
+        let unique_filename = format!("{}-{}", uuid::Uuid::new_v4(), safe_name);
+        let url = format!(
+            "{}/object/{}/{}",
+            self.base_url, self.bucket_name, unique_filename
+        );
+        
+        let response = self.client
+            .post(&url)
+            .header("apikey", &self.service_key)
+            .header("Authorization", format!("Bearer {}", self.service_key))
+            .header("Content-Type", content_type)
+            .body(content)
+            .send()
+            .await?;
+        
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::ExternalService(format!(
+                "Upload failed (status {status}): {body}"
+            )));
+        }
+        
+        Ok(self.get_public_url(&unique_filename))
+    }
+    
+    pub fn get_public_url(&self, path: &str) -> String {
+        format!(
+            "{}/object/public/{}/{}",
+            self.base_url, self.bucket_name, path
+        )
+    }
+}
 ```
 
-## Error Handling
+## Authentication Pattern
 
-Handle Supabase-specific errors appropriately:
+Extract and validate Bearer tokens:
 
-```python
-try:
-    result = await service.create(data)
-except Exception as e:
-    if "duplicate key" in str(e).lower():
-        raise HTTPException(status_code=409, detail="Resource already exists")
-    elif "not found" in str(e).lower():
-        raise HTTPException(status_code=404, detail="Resource not found")
-    else:
-        raise HTTPException(status_code=500, detail="Database operation failed")
+```rust
+use axum::http::{header, HeaderMap};
+
+fn extract_bearer_token(headers: &HeaderMap) -> Result<String, AppError> {
+    let auth_header = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| {
+            AppError::Unauthorized("Missing Authorization header".to_string())
+        })?;
+    
+    auth_header
+        .strip_prefix("Bearer ")
+        .or_else(|| auth_header.strip_prefix("bearer "))
+        .map(|s| s.to_string())
+        .ok_or_else(|| {
+            AppError::Unauthorized("Invalid Authorization format".to_string())
+        })
+}
+
+async fn authenticate(headers: &HeaderMap) -> Result<UserProfile, AppError> {
+    let token = extract_bearer_token(headers)?;
+    let auth_service = SupabaseAuthService::new()?;
+    auth_service.get_user(&token).await
+}
 ```
 
-## Row Level Security (RLS)
+## User Models
 
-When creating new tables, always consider RLS policies:
+```rust
+use serde::Deserialize;
 
-```sql
--- Enable RLS
-ALTER TABLE public.your_table ENABLE ROW LEVEL SECURITY;
+#[derive(Debug, Clone, Deserialize)]
+pub struct SupabaseUser {
+    pub id: String,
+    pub email: Option<String>,
+    #[serde(default)]
+    pub user_metadata: UserMetadata,
+}
 
--- Create policies
-CREATE POLICY "Users can read own data"
-  ON public.your_table
-  FOR SELECT
-  USING (auth.uid() = user_id);
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct UserMetadata {
+    pub full_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+// Note: UserProfile.email should be Option<String> to properly handle missing emails
+impl From<SupabaseUser> for UserProfile {
+    fn from(user: SupabaseUser) -> Self {
+        Self {
+            id: user.id,
+            email: user.email,
+            full_name: user.user_metadata.full_name,
+            avatar_url: user.user_metadata.avatar_url,
+        }
+    }
+}
 ```
 
-## Migration Best Practices
+## Best Practices
 
-- Always test migrations on a staging environment first
-- Use descriptive migration names: `make db-migration-new name=add_user_preferences_table`
-- Include both up and down migration logic when possible
-- Add proper indexes for performance
-- Set up appropriate RLS policies for security
+1. **Always validate tokens** before processing requests
+2. **Use service key** for backend operations (not anon key)
+3. **Log authentication events** with **non-PII** context only: internal user id, request id, and outcome. **Do not** log email addresses, raw tokens, `Authorization` headers, session ids, or service keys (also applies to error paths and structured logs sent to third parties)
+4. **Handle all error cases** explicitly
+5. **Use RLS policies** in database for additional security
+6. **Never expose service key** in responses or logs

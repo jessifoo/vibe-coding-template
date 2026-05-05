@@ -1,147 +1,185 @@
-# Backend Documentation
+# Backend Context (Rust Axum)
 
-This document provides an overview of the backend API architecture, services, and endpoints.
+This document provides context for the Rust Axum backend.
 
-## Architecture Overview
+## Technology Stack
 
-The backend is built using FastAPI, a modern, high-performance web framework for building APIs with Python. It integrates with Supabase for authentication, database, and storage services, provides an abstraction layer for LLM services (OpenAI and Anthropic), and includes vector database functionality with Qdrant.
+- **Framework**: Axum 0.7 (async web framework)
+- **Runtime**: Tokio (async runtime)
+- **Serialization**: Serde (JSON serialization)
+- **Validation**: Validator (request validation)
+- **HTTP Client**: Reqwest (async HTTP client)
+- **Logging**: Tracing (structured logging)
+- **Error Handling**: thiserror + anyhow
 
-### Tech Stack
-- **FastAPI**: Fast API development with automatic OpenAPI documentation
-- **Supabase**: For authentication, database, and storage
-- **LLM Integration**: OpenAI and Anthropic API integrations
-- **Vector Database**: Qdrant for vector search and storage
-
-## Module Structure
+## Project Structure
 
 ```
 backend/
-├── app/
-│   ├── api/                  # API endpoints
-│   │   ├── endpoints/        # API route handlers
-│   │   │   ├── auth.py       # Authentication endpoints
-│   │   │   ├── llm.py        # LLM service endpoints
-│   │   │   └── vectordb.py   # Vector database endpoints
-│   │   └── router.py         # API router configuration
-│   ├── core/                 # Core application code
-│   │   ├── config.py         # Application configuration
-│   ├── models/               # Data models
-│   │   ├── auth.py           # Authentication models
-│   │   ├── llm.py            # LLM service models
-│   │   └── vectordb.py       # Vector database models
-│   ├── services/             # Service layer
-│   │   ├── llm/              # LLM services
-│   │   │   ├── llm_service.py      # Text generation service
-│   │   │   └── embedding_service.py # Embedding service
-│   │   ├── supabase/         # Supabase services
-│   │   │   ├── auth.py       # Authentication service
-│   │   │   ├── database.py   # Database service
-│   │   │   └── storage.py    # Storage service
-│   │   └── vectordb/         # Vector database services
-│   │       └── qdrant_service.py # Qdrant service
-│   └── main.py               # Application entry point
-├── Dockerfile                # Production Docker configuration
-├── Dockerfile.dev            # Development Docker configuration
-├── Makefile                  # Commands for development
-└── requirements.txt          # Python dependencies
+├── src/
+│   ├── main.rs           # Application entry point
+│   ├── lib.rs            # Library exports
+│   ├── api/              # HTTP endpoint handlers
+│   │   ├── mod.rs        # Router configuration
+│   │   ├── auth.rs       # Authentication endpoints
+│   │   ├── llm.rs        # LLM endpoints
+│   │   └── vectordb.rs   # Vector database endpoints
+│   ├── config/           # Configuration management
+│   │   └── mod.rs        # Settings from environment
+│   ├── models/           # Data models
+│   │   ├── mod.rs        # Module exports
+│   │   ├── auth.rs       # Auth-related types
+│   │   ├── error.rs      # Error types
+│   │   ├── llm.rs        # LLM types
+│   │   └── vectordb.rs   # Vector DB types
+│   └── services/         # Business logic
+│       ├── mod.rs        # Module exports
+│       ├── llm/          # LLM services
+│       │   ├── mod.rs
+│       │   ├── llm.rs    # Text generation
+│       │   └── embedding.rs # Embeddings
+│       ├── supabase/     # Supabase services
+│       │   ├── mod.rs
+│       │   ├── auth.rs   # Authentication
+│       │   ├── database.rs # CRUD operations
+│       │   └── storage.rs  # File storage
+│       └── vectordb/     # Vector DB services
+│           ├── mod.rs
+│           └── qdrant.rs # Qdrant client
+├── Cargo.toml            # Dependencies
+├── Dockerfile            # Production image
+└── Dockerfile.dev        # Development image
+```
+
+## Key Concepts
+
+### Error Handling
+
+All errors use the `AppError` enum:
+
+```rust
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error("Authentication failed: {0}")]
+    Unauthorized(String),
+    
+    #[error("Invalid request: {0}")]
+    BadRequest(String),
+    
+    #[error("Not found: {0}")]
+    NotFound(String),
+    
+    #[error("External service error: {0}")]
+    ExternalService(String),
+    
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+```
+
+### Service Traits
+
+Services use traits for abstraction:
+
+```rust
+#[async_trait]
+pub trait LlmService: Send + Sync {
+    async fn generate_text(
+        &self,
+        prompt: &str,
+        model: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> Result<TextGenerationResponse, AppError>;
+}
+```
+
+### Configuration
+
+Settings loaded from environment via `once_cell::Lazy`:
+
+```rust
+pub static SETTINGS: Lazy<Settings> = Lazy::new(|| {
+    Settings::from_env().expect("Failed to load settings")
+});
 ```
 
 ## API Endpoints
 
-### Authentication
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/` | Health check |
+| GET | `/api/auth/me` | Get current user |
+| POST | `/api/auth/provider-token` | Exchange OAuth token |
+| POST | `/api/llm/generate` | Generate text |
+| POST | `/api/llm/embedding` | Create embedding |
+| POST | `/api/vectordb/documents` | Add documents |
+| POST | `/api/vectordb/search` | Search documents |
+| DELETE | `/api/vectordb/documents` | Delete documents |
 
-- **GET /api/auth/me**: Get the current user profile
-  - Requires: Bearer token authentication
-  - Returns: User profile information
+## Environment Variables
 
-- **POST /api/auth/provider-token**: Exchange a provider token for a Supabase token
-  - Requires: Provider name (google, linkedin) and token
-  - Returns: Access token for authenticated API calls
+Required:
+- `SUPABASE_URL` - Supabase project URL
+- `SUPABASE_SERVICE_KEY` - Supabase service role key
 
-### LLM Services
+Optional:
+- `ENVIRONMENT` - development/staging/production
+- `HOST` - Server host (default: 0.0.0.0)
+- `PORT` - Server port (default: 8000)
+- `CORS_ORIGINS` - Comma-separated allowed origins
+- `OPENAI_API_KEY` - For text generation
+- `ANTHROPIC_API_KEY` - For text generation
+- `QDRANT_URL` - Vector database URL
+- `QDRANT_API_KEY` - Vector database API key
+- `QDRANT_COLLECTION_NAME` - Default collection name
 
-- **POST /api/llm/generate**: Generate text using an LLM
-  - Requires: Bearer token authentication, prompt, and optional model parameters
-  - Returns: Generated text and usage statistics
+## Development Commands
 
-- **POST /api/llm/embedding**: Create an embedding vector for text
-  - Requires: Bearer token authentication, text to embed, and optional model parameters
-  - Returns: Embedding vector and usage statistics
+```bash
+# Build
+cargo build --release
 
-### Vector Database
+# Run
+cargo run
 
-- **POST /api/vectordb/documents**: Add documents to the vector database
-  - Requires: Bearer token authentication, documents with text content
-  - Returns: Document IDs for the added documents
+# Run with hot reload
+cargo watch -x run
 
-- **POST /api/vectordb/search**: Search for similar documents
-  - Requires: Bearer token authentication, query text
-  - Returns: Matching documents with similarity scores
+# Test
+cargo test
 
-- **DELETE /api/vectordb/documents**: Delete documents from the vector database
-  - Requires: Bearer token authentication, document IDs
-  - Returns: No content on success
+# Lint
+cargo clippy -- -D warnings
 
-## Services
+# Format
+cargo fmt
+```
 
-### Supabase Services
+## Key Dependencies
 
-#### Authentication Service
-The SupabaseAuthService handles user authentication using Supabase Auth. It supports:
-- Google and LinkedIn OAuth authentication
-- JWT token validation and exchange
+```toml
+axum = "0.7"              # Web framework
+tokio = "1.35"            # Async runtime
+serde = "1.0"             # Serialization
+reqwest = "0.12"          # HTTP client
+validator = "0.18"        # Validation
+thiserror = "1.0"         # Error handling
+tracing = "0.1"           # Logging
+qdrant-client = "1.10"    # Vector database
+```
 
-#### Database Service
-The SupabaseDatabaseService provides generic CRUD operations with type safety:
-- List records with filtering
-- Get a single record by ID
-- Create, update, and delete records
+## Linting Rules
 
-#### Storage Service
-The SupabaseStorageService provides a high-level interface to Supabase Storage:
-- Upload files
-- Get public URLs for files
-- Delete files
-- List files in a directory
+The project enforces strict linting:
+- No `unsafe` code
+- No `.unwrap()` or `.expect()`
+- All clippy warnings as errors
 
-### LLM Services
+## Why Rust?
 
-#### LLM Service
-Abstraction layer for text generation with multiple providers:
-- OpenAI GPT models
-- Anthropic Claude models
-- Factory pattern for provider selection
-
-#### Embedding Service
-Abstraction layer for creating vector embeddings:
-- OpenAI embeddings
-- Placeholder for Anthropic embeddings (when available)
-- Factory pattern for provider selection
-
-### Vector Database Service
-
-#### Qdrant Service
-Vector database service for semantic search:
-- Document storage with metadata
-- Semantic search based on vector embeddings
-- Filtering capabilities for metadata
-- Document deletion and collection management
-
-## Configuration
-
-Environment variables are managed through the `app.core.config` module using Pydantic settings.
-
-Required environment variables:
-- `SUPABASE_URL`: URL of your Supabase project
-- `SUPABASE_SERVICE_KEY`: Service key for Supabase project
-- `OPENAI_API_KEY`: OpenAI API key (optional if not using OpenAI)
-- `ANTHROPIC_API_KEY`: Anthropic API key (optional if not using Anthropic)
-- `QDRANT_URL`: URL of your Qdrant vector database (optional for local testing)
-- `QDRANT_API_KEY`: API key for Qdrant (optional for local testing)
-- `ENVIRONMENT`: Application environment (development, production)
-- `CORS_ORIGINS`: Comma-separated list of allowed CORS origins
-
-## Docker Setup
-
-- **Development**: Uses hot-reloading for faster development
-- **Production**: Optimized for performance and security
+1. **Compile-time correctness** - Bugs caught before runtime
+2. **No null pointer exceptions** - `Option<T>` and `Result<T, E>`
+3. **Explicit error handling** - Every error must be handled
+4. **Zero-cost abstractions** - High-level code, low-level performance
+5. **Memory safety** - No data races, no use-after-free

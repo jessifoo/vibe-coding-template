@@ -1,0 +1,178 @@
+//! Embedding service for creating vector embeddings.
+//!
+//! Currently supports OpenAI embeddings. Anthropic placeholder included for future support.
+
+use crate::config::SETTINGS;
+use crate::http_error::read_failed_response_text;
+use crate::models::{AppError, EmbeddingResponse, LlmProvider, LlmUsage};
+use async_trait::async_trait;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+
+/// Trait for embedding services.
+#[async_trait]
+pub trait EmbeddingService: Send + Sync {
+    /// Create an embedding vector for the given text.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - Text to create embedding for
+    /// * `model` - Embedding model to use
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if embedding creation fails.
+    async fn create_embedding(
+        &self,
+        text: &str,
+        model: &str,
+    ) -> Result<EmbeddingResponse, AppError>;
+}
+
+/// OpenAI embedding service.
+pub struct OpenAiEmbeddingService {
+    client: Client,
+    api_key: String,
+}
+
+impl OpenAiEmbeddingService {
+    /// Create a new OpenAI embedding service.
+    ///
+    /// # Arguments
+    ///
+    /// * `api_key` - OpenAI API key
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be created.
+    pub fn new(api_key: String) -> Result<Self, AppError> {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .map_err(|e| AppError::Configuration(format!("Failed to create HTTP client: {e}")))?;
+
+        Ok(Self { client, api_key })
+    }
+}
+
+#[async_trait]
+impl EmbeddingService for OpenAiEmbeddingService {
+    async fn create_embedding(
+        &self,
+        text: &str,
+        model: &str,
+    ) -> Result<EmbeddingResponse, AppError> {
+        #[derive(Serialize)]
+        struct EmbeddingRequest<'a> {
+            model: &'a str,
+            input: &'a str,
+        }
+
+        #[derive(Deserialize)]
+        struct OpenAiEmbeddingResponse {
+            data: Vec<EmbeddingData>,
+            usage: EmbeddingUsage,
+        }
+
+        #[derive(Deserialize)]
+        struct EmbeddingData {
+            embedding: Vec<f32>,
+        }
+
+        #[derive(Deserialize)]
+        struct EmbeddingUsage {
+            prompt_tokens: u32,
+            total_tokens: u32,
+        }
+
+        let request = EmbeddingRequest { model, input: text };
+
+        let response = self
+            .client
+            .post("https://api.openai.com/v1/embeddings")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| {
+                AppError::ExternalService(format!("OpenAI embedding request failed: {e}"))
+            })?;
+
+        if !response.status().is_success() {
+            let (status, body) = read_failed_response_text(response).await?;
+            return Err(AppError::ExternalService(format!(
+                "OpenAI embedding API error (status {status}): {body}"
+            )));
+        }
+
+        let openai_response: OpenAiEmbeddingResponse = response.json().await.map_err(|e| {
+            AppError::ExternalService(format!("Failed to parse embedding response: {e}"))
+        })?;
+
+        let embedding = openai_response
+            .data
+            .into_iter()
+            .next()
+            .map(|d| d.embedding)
+            .ok_or_else(|| AppError::ExternalService("No embedding in response".to_string()))?;
+
+        Ok(EmbeddingResponse {
+            embedding,
+            model: model.to_string(),
+            usage: LlmUsage {
+                prompt_tokens: openai_response.usage.prompt_tokens,
+                completion_tokens: None,
+                total_tokens: openai_response.usage.total_tokens,
+            },
+        })
+    }
+}
+
+/// Factory for creating embedding service instances.
+pub struct EmbeddingServiceFactory;
+
+impl EmbeddingServiceFactory {
+    /// Get an embedding service for the specified provider.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - The LLM provider to use
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the provider is not configured.
+    pub fn get_service(provider: LlmProvider) -> Result<Box<dyn EmbeddingService>, AppError> {
+        match provider {
+            LlmProvider::OpenAI => {
+                let api_key = SETTINGS
+                    .llm
+                    .openai_api_key
+                    .clone()
+                    .filter(|k| !k.is_empty())
+                    .ok_or_else(|| {
+                        AppError::Configuration(
+                            "OpenAI API key not configured. Please set OPENAI_API_KEY.".to_string(),
+                        )
+                    })?;
+                Ok(Box::new(OpenAiEmbeddingService::new(api_key)?))
+            }
+            LlmProvider::Anthropic => {
+                // Anthropic does not support embeddings - fail fast
+                Err(AppError::BadRequest(
+                    "Anthropic does not support embeddings. Please use OpenAI (provider: 'openai')."
+                        .to_string(),
+                ))
+            }
+        }
+    }
+
+    /// Get the default embedding service (OpenAI).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if OpenAI is not configured.
+    pub fn get_default() -> Result<Box<dyn EmbeddingService>, AppError> {
+        Self::get_service(LlmProvider::OpenAI)
+    }
+}

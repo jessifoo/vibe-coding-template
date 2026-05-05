@@ -1,5 +1,7 @@
 .PHONY: dev dev-frontend dev-backend prod prod-frontend prod-backend clean help
+.PHONY: logs stop prod-logs prod-stop
 .PHONY: db-migration-new db-apply db-list db-push db-status
+.PHONY: install-frontend build-frontend install-backend build-backend test-backend lint-backend check-backend fmt-backend ci ci-full lint-frontend test-frontend verify-tracked
 
 # Default target
 .DEFAULT_GOAL := help
@@ -23,6 +25,14 @@ dev-backend: ## Start only the backend development server
 	@echo "${GREEN}Starting backend development server...${NC}"
 	docker-compose up backend
 
+logs: ## Stream logs from all development services
+	@echo "${GREEN}Streaming development logs...${NC}"
+	docker-compose logs -f
+
+stop: ## Stop all development services
+	@echo "${YELLOW}Stopping development services...${NC}"
+	docker-compose down
+
 # Production environment
 prod: ## Start the full production environment
 	@echo "${GREEN}Starting full production environment...${NC}"
@@ -35,6 +45,14 @@ prod-frontend: ## Start only the frontend production server
 prod-backend: ## Start only the backend production server
 	@echo "${GREEN}Starting backend production server...${NC}"
 	docker-compose -f docker-compose.prod.yml up -d backend
+
+prod-logs: ## Stream logs from production services
+	@echo "${GREEN}Streaming production logs...${NC}"
+	docker-compose -f docker-compose.prod.yml logs -f
+
+prod-stop: ## Stop all production services
+	@echo "${YELLOW}Stopping production services...${NC}"
+	docker-compose -f docker-compose.prod.yml down
 
 # Clean up
 clean: ## Remove containers and volumes
@@ -51,10 +69,39 @@ build-frontend: ## Build frontend for production
 	@echo "${GREEN}Building frontend for production...${NC}"
 	cd frontend && npm run build
 
-# Backend helpers
-install-backend: ## Install backend dependencies locally
-	@echo "${GREEN}Installing backend dependencies...${NC}"
-	cd backend && pip install -r requirements.txt
+# Backend helpers (Rust)
+# Installs globally to ~/.cargo/bin (standard for Rust CLI tools). Ensure that directory is on PATH.
+install-backend: ## Install backend development tools
+	@echo "${GREEN}Installing backend development tools...${NC}"
+	cd backend && cargo install cargo-watch cargo-audit
+
+build-backend: ## Build backend in release mode
+	@echo "${GREEN}Building backend for production...${NC}"
+	cd backend && cargo build --release
+
+test-backend: ## Run backend tests
+	@echo "${GREEN}Running backend tests...${NC}"
+	cd backend && cargo test
+
+lint-backend: ## Run backend linter (clippy)
+	@echo "${GREEN}Running backend linter...${NC}"
+	cd backend && cargo clippy -- -D warnings
+
+check-backend: ## Check backend compiles
+	@echo "${GREEN}Checking backend...${NC}"
+	cd backend && cargo check
+
+fmt-backend: ## Format backend code
+	@echo "${GREEN}Formatting backend code...${NC}"
+	cd backend && cargo fmt
+
+lint-frontend: ## Run frontend ESLint
+	@echo "${GREEN}Linting frontend...${NC}"
+	cd frontend && npm run lint
+
+test-frontend: ## Run frontend typecheck (Next.js build includes typecheck)
+	@echo "${GREEN}Typechecking/building frontend...${NC}"
+	cd frontend && npm run build
 
 # Supabase database migrations (all for remote database)
 db-migration-new: ## Create a new migration file (Usage: make db-migration-new name=create_users_table)
@@ -81,6 +128,26 @@ db-status: ## Show pending migrations status
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "${YELLOW}Migration files in project:${NC}"
 	@ls -1 supabase/migrations/*.sql 2>/dev/null | sed 's/.*\//  /' || echo "  None"
+
+# CI helpers
+# `ci` runs backend checks only (fast path for API work). Use `ci-full` for full stack.
+ci: lint-backend test-backend ## Run backend CI (lint + test)
+	@echo "${GREEN}Backend CI checks passed!${NC}"
+
+ci-full: lint-backend test-backend lint-frontend test-frontend ## Run full-stack CI
+	@echo "${GREEN}Full CI checks passed!${NC}"
+
+# Fail if build artifacts or dependencies were accidentally `git add`ed
+verify-tracked: ## Ensure git does not track node_modules, target/, .next, etc.
+	@bad=$$(git ls-files | grep -E 'node_modules/|/target/|/\.next/|__pycache__/|(^|/)\.env$$|(^|/)\.env\.(local|development|test|production)' || true); \
+	if [ -n "$$bad" ]; then \
+		echo "${RED}These paths are tracked but must stay ignored (see .gitignore):${NC}"; \
+		echo "$$bad"; \
+		echo "Run: git rm -r --cached <path>   # then commit"; \
+		exit 1; \
+	fi; \
+	n=$$(git ls-files | wc -l); \
+	echo "${GREEN}verify-tracked: OK ($${n} files).${NC}"
 
 # Help command
 help: ## Show this help

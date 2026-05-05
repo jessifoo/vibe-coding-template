@@ -1,4 +1,4 @@
-.PHONY: install dev test lint clean
+.PHONY: build dev test lint clean check fmt doc
 
 # Default target
 .DEFAULT_GOAL := help
@@ -8,32 +8,60 @@ GREEN=\033[0;32m
 YELLOW=\033[0;33m
 NC=\033[0m # No Color
 
-install: ## Install dependencies
-	@echo "${GREEN}Installing dependencies...${NC}"
-	pip install -r requirements.txt
+build: ## Build the application in release mode
+	@echo "${GREEN}Building release binary...${NC}"
+	cargo build --release
 
-dev: ## Run development server
-	@echo "${GREEN}Starting development server...${NC}"
-	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+dev: ## Run development server with hot reload
+	@echo "${GREEN}Starting development server with hot reload...${NC}"
+	cargo watch -x run
 
-lint: ## Run linting
-	@echo "${GREEN}Running linters...${NC}"
-	flake8 app
-	isort app
-	black app
+run: ## Run the application
+	@echo "${GREEN}Running application...${NC}"
+	cargo run
 
-test: ## Run tests
+test: ## Run all tests
 	@echo "${GREEN}Running tests...${NC}"
-	pytest
+	cargo test
 
-clean: ## Clean up cache files
-	@echo "${YELLOW}Cleaning up cache files...${NC}"
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type d -name .pytest_cache -exec rm -rf {} +
-	find . -type d -name .coverage -exec rm -rf {} +
-	find . -type f -name "*.pyc" -delete
-	find . -type f -name "*.pyo" -delete
-	find . -type f -name "*.pyd" -delete
+lint: ## Run clippy linter with all warnings
+	@echo "${GREEN}Running clippy...${NC}"
+	cargo clippy -- -D warnings
+
+check: ## Check code compiles without building
+	@echo "${GREEN}Checking code...${NC}"
+	cargo check
+
+fmt: ## Format code with rustfmt
+	@echo "${GREEN}Formatting code...${NC}"
+	cargo fmt
+
+fmt-check: ## Check code formatting
+	@echo "${GREEN}Checking formatting...${NC}"
+	cargo fmt -- --check
+
+doc: ## Generate documentation
+	@echo "${GREEN}Generating documentation...${NC}"
+	cargo doc --no-deps --open
+
+clean: ## Clean build artifacts
+	@echo "${YELLOW}Cleaning build artifacts...${NC}"
+	cargo clean
+
+audit: ## Run security audit on dependencies
+	@echo "${GREEN}Running security audit...${NC}"
+	cargo audit
+
+# Development setup
+setup: ## Install development tools
+	@echo "${GREEN}Installing development tools...${NC}"
+	cargo install --locked cargo-watch || true
+	cargo install --locked cargo-audit || true
+	cargo install --locked cargo-edit || true
+
+# All checks (for CI)
+ci: fmt-check lint test audit ## Run all CI checks (incl. dependency audit)
+	@echo "${GREEN}All CI checks passed!${NC}"
 
 help: ## Show this help
 	@echo "Usage: make [target]"
