@@ -35,7 +35,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # JWT handling
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 
 # UUID generation
 uuid = { version = "1", features = ["v4", "serde"] }
