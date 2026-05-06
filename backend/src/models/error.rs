@@ -54,6 +54,9 @@ impl IntoResponse for ApiErrorResponse {
 /// Fatal errors when building or starting the HTTP server (outside request handling).
 #[derive(Debug, Error)]
 pub enum AppRunError {
+    #[error("Failed to load configuration: {0}")]
+    Config(#[from] crate::config::SettingsError),
+
     #[error("Failed to initialize Qdrant: {0}")]
     QdrantInit(AppError),
 

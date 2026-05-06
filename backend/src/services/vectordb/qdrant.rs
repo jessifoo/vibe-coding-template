@@ -26,14 +26,17 @@ impl QdrantService {
     ///
     /// # Errors
     ///
-    /// Returns an error if connection to Qdrant fails.
+    /// Returns an error if connection to Qdrant fails or if configuration is invalid.
     pub async fn new() -> Result<Self, AppError> {
-        let collection_name = SETTINGS.qdrant.collection_name.clone();
+        let settings = SETTINGS.as_ref()
+            .map_err(|e| AppError::Configuration(format!("Failed to load settings: {e}")))?;
 
-        let client = if let Some(url) = &SETTINGS.qdrant.url {
+        let collection_name = settings.qdrant.collection_name.clone();
+
+        let client = if let Some(url) = &settings.qdrant.url {
             let mut builder = Qdrant::from_url(url);
 
-            if let Some(api_key) = &SETTINGS.qdrant.api_key {
+            if let Some(api_key) = &settings.qdrant.api_key {
                 builder = builder.api_key(api_key.clone());
             }
 

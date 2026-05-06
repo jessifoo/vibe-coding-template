@@ -22,8 +22,11 @@ impl SupabaseAuthService {
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be created.
+    /// Returns an error if the HTTP client cannot be created or if configuration is invalid.
     pub fn new() -> Result<Self, AppError> {
+        let settings = SETTINGS.as_ref()
+            .map_err(|e| AppError::Configuration(format!("Failed to load settings: {e}")))?;
+
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -31,8 +34,8 @@ impl SupabaseAuthService {
 
         Ok(Self {
             client,
-            supabase_url: SETTINGS.supabase.url.clone(),
-            service_key: SETTINGS.supabase.service_key.clone(),
+            supabase_url: settings.supabase.url.clone(),
+            service_key: settings.supabase.service_key.clone(),
         })
     }
 

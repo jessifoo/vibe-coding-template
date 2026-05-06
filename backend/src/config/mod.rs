@@ -10,17 +10,11 @@ use std::sync::LazyLock;
 
 /// Global application settings, loaded once at startup.
 ///
-/// # Panics
-///
-/// Panics if required environment variables (`SUPABASE_URL`,
-/// `SUPABASE_SERVICE_KEY`) are missing or invalid. This is intentional:
-/// the process cannot meaningfully serve traffic without valid settings,
-/// and the panic surfaces during startup rather than per request.
-pub static SETTINGS: LazyLock<Settings> = LazyLock::new(|| {
-    Settings::from_env().unwrap_or_else(|e| {
-        eprintln!("Failed to load settings: {e}");
-        panic!("Failed to load settings: {e}");
-    })
+/// Contains a `Result` that captures any configuration loading errors.
+/// The error is mapped into `AppRunError` during application startup
+/// rather than causing a panic at initialization time.
+pub static SETTINGS: LazyLock<Result<Settings, SettingsError>> = LazyLock::new(|| {
+    Settings::from_env()
 });
 
 const REDACTED: &str = "<REDACTED>";
@@ -335,7 +329,7 @@ impl std::str::FromStr for Environment {
 }
 
 /// Configuration errors.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum SettingsError {
     #[error("Missing required environment variable: {0}")]
     MissingEnvVar(String),

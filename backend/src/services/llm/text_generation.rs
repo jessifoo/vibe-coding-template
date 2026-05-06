@@ -246,11 +246,14 @@ impl LlmServiceFactory {
     ///
     /// # Errors
     ///
-    /// Returns an error if the provider is not configured.
+    /// Returns an error if the provider is not configured or if configuration is invalid.
     pub fn get_service(provider: LlmProvider) -> Result<Box<dyn LlmService>, AppError> {
+        let settings = SETTINGS.as_ref()
+            .map_err(|e| AppError::Configuration(format!("Failed to load settings: {e}")))?;
+
         match provider {
             LlmProvider::OpenAI => {
-                let api_key = SETTINGS
+                let api_key = settings
                     .llm
                     .openai_api_key
                     .as_deref()
@@ -264,7 +267,7 @@ impl LlmServiceFactory {
                 Ok(Box::new(OpenAiService::new(api_key)))
             }
             LlmProvider::Anthropic => {
-                let api_key = SETTINGS
+                let api_key = settings
                     .llm
                     .anthropic_api_key
                     .as_deref()

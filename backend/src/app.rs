@@ -26,16 +26,19 @@ use crate::models::AppRunError;
 ///
 /// # Errors
 ///
-/// Returns [`AppRunError`] when a long-lived resource (e.g. Qdrant) cannot be
-/// initialized.
+/// Returns [`AppRunError`] when configuration fails to load or when a long-lived
+/// resource (e.g. Qdrant) cannot be initialized.
 ///
 /// The returned [`Router`] is a [`Router<()>`](Router): routes were built with
 /// [`Router<AppState>`](AppState) and then completed with
 /// [`Router::with_state`](Router::with_state), which is the pattern Axum
 /// documents for `axum::serve`.
 pub async fn build_app() -> Result<Router, AppRunError> {
+    // Check SETTINGS and convert any error into AppRunError
+    let _settings = SETTINGS.as_ref().map_err(|e| AppRunError::from(e.clone()))?;
+
     let app_state = AppState::try_new().await?;
-    let cors = build_cors_layer();
+    let cors = build_cors_layer()?;
 
     Ok(Router::new()
         .route("/", get(health_check))
@@ -48,8 +51,10 @@ pub async fn build_app() -> Result<Router, AppRunError> {
 }
 
 /// Build CORS from [`SETTINGS`].
-fn build_cors_layer() -> CorsLayer {
-    let origins: Vec<_> = SETTINGS
+fn build_cors_layer() -> Result<CorsLayer, AppRunError> {
+    let settings = SETTINGS.as_ref().map_err(|e| AppRunError::from(e.clone()))?;
+
+    let origins: Vec<_> = settings
         .cors
         .origins
         .iter()
@@ -57,7 +62,7 @@ fn build_cors_layer() -> CorsLayer {
         .collect();
 
     let mut cors = if origins.is_empty() {
-        if SETTINGS.environment == Environment::Development {
+        if settings.environment == Environment::Development {
             tracing::warn!("No CORS origins configured, allowing any origin (development mode)");
             CorsLayer::new().allow_origin(Any)
         } else {
@@ -88,16 +93,21 @@ fn build_cors_layer() -> CorsLayer {
         ])
         .max_age(std::time::Duration::from_secs(600));
 
-    cors
+    Ok(cors)
 }
 
 /// Health check at `/`.
 async fn health_check() -> impl IntoResponse {
+    let environment = SETTINGS
+        .as_ref()
+        .map(|s| s.environment.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
     (
         StatusCode::OK,
         Json(json!({
             "status": "online",
-            "environment": SETTINGS.environment.to_string(),
+            "environment": environment,
             "version": env!("CARGO_PKG_VERSION")
         })),
     )
@@ -107,13 +117,15 @@ async fn health_check() -> impl IntoResponse {
 pub async fn run() -> Result<(), AppRunError> {
     init_tracing();
 
+    let settings = SETTINGS.as_ref().map_err(|e| AppRunError::from(e.clone()))?;
+
     tracing::info!(
-        environment = %SETTINGS.environment,
+        environment = %settings.environment,
         "Starting backend server"
     );
 
     let app = build_app().await?;
-    let bind_address = format!("{}:{}", SETTINGS.server.host, SETTINGS.server.port);
+    let bind_address = format!("{}:{}", settings.server.host, settings.server.port);
     let addr: SocketAddr = bind_address.parse()
         .map_err(|e| std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -122,7 +134,7 @@ pub async fn run() -> Result<(), AppRunError> {
 
     tracing::info!(
         address = %addr,
-        cors_origins = ?SETTINGS.cors.origins,
+        cors_origins = ?settings.cors.origins,
         "Server listening"
     );
 
