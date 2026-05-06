@@ -3,7 +3,15 @@
 //! Types for text generation and embedding requests/responses.
 
 use serde::{Deserialize, Serialize};
-use validator::Validate;
+use validator::{Validate, ValidationError};
+
+/// Validator to reject empty or whitespace-only strings.
+fn validate_non_blank(s: &str) -> Result<(), ValidationError> {
+    if s.trim().is_empty() {
+        return Err(ValidationError::new("non_blank"));
+    }
+    Ok(())
+}
 
 /// Supported LLM providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -64,10 +72,12 @@ impl LlmUsage {
 pub struct TextGenerationRequest {
     /// The prompt to generate text from
     #[validate(length(min = 1, message = "Prompt cannot be empty"))]
+    #[validate(custom(function = "validate_non_blank", message = "Prompt cannot be whitespace only"))]
     pub prompt: String,
 
     /// Model to use for generation
     #[serde(default = "default_text_model")]
+    #[validate(custom(function = "validate_non_blank", message = "Model cannot be whitespace only"))]
     pub model: String,
 
     /// Maximum tokens to generate
@@ -119,10 +129,12 @@ pub struct TextGenerationResponse {
 pub struct EmbeddingRequest {
     /// Text to create embedding for
     #[validate(length(min = 1, message = "Text cannot be empty"))]
+    #[validate(custom(function = "validate_non_blank", message = "Text cannot be whitespace only"))]
     pub text: String,
 
     /// Model to use for embedding
     #[serde(default = "default_embedding_model")]
+    #[validate(custom(function = "validate_non_blank", message = "Model cannot be whitespace only"))]
     pub model: String,
 
     /// Provider to use
@@ -131,7 +143,7 @@ pub struct EmbeddingRequest {
 }
 
 fn default_embedding_model() -> String {
-    "text-embedding-3-small".to_string()
+    crate::models::defaults::default_embedding_model()
 }
 
 /// Response from embedding creation.

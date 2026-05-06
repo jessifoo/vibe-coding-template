@@ -20,6 +20,8 @@ Use this template when creating new service classes for external integrations.
 //! ```toml
 //! uuid = { version = "1.0", features = ["v4", "serde"] }
 //! chrono = { version = "0.4", features = ["serde"] }
+//! parking_lot = "0.12"
+//! urlencoding = "2.1"
 //! ```
 
 use async_trait::async_trait;
@@ -153,6 +155,7 @@ impl SupabaseItemService {
     /// Returns an error if the HTTP client cannot be created.
     pub fn new() -> Result<Self, AppError> {
         let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
             .build()
             .map_err(|e| AppError::Configuration(format!("HTTP client error: {e}")))?;
 
@@ -200,9 +203,10 @@ impl SupabaseItemService {
 #[async_trait]
 impl ItemService for SupabaseItemService {
     async fn list_for_user(&self, user_id: &str) -> Result<Vec<Item>, AppError> {
+        let encoded_user_id = urlencoding::encode(user_id);
         let url = format!(
             "{}/items?user_id=eq.{}&select=*&order=created_at.desc",
-            self.base_url, user_id
+            self.base_url, encoded_user_id
         );
 
         let response = self.send_request(self.client.get(&url)).await?;
@@ -214,9 +218,11 @@ impl ItemService for SupabaseItemService {
     }
 
     async fn get(&self, id: &str, user_id: &str) -> Result<Option<Item>, AppError> {
+        let encoded_id = urlencoding::encode(id);
+        let encoded_user_id = urlencoding::encode(user_id);
         let url = format!(
             "{}/items?id=eq.{}&user_id=eq.{}&select=*",
-            self.base_url, id, user_id
+            self.base_url, encoded_id, encoded_user_id
         );
 
         let response = self.send_request(self.client.get(&url)).await?;
@@ -258,9 +264,11 @@ impl ItemService for SupabaseItemService {
         user_id: &str,
         data: &UpdateItemData,
     ) -> Result<Item, AppError> {
+        let encoded_id = urlencoding::encode(id);
+        let encoded_user_id = urlencoding::encode(user_id);
         let url = format!(
             "{}/items?id=eq.{}&user_id=eq.{}",
-            self.base_url, id, user_id
+            self.base_url, encoded_id, encoded_user_id
         );
 
         let response = self
@@ -284,9 +292,11 @@ impl ItemService for SupabaseItemService {
     }
 
     async fn delete(&self, id: &str, user_id: &str) -> Result<(), AppError> {
+        let encoded_id = urlencoding::encode(id);
+        let encoded_user_id = urlencoding::encode(user_id);
         let url = format!(
             "{}/items?id=eq.{}&user_id=eq.{}",
-            self.base_url, id, user_id
+            self.base_url, encoded_id, encoded_user_id
         );
 
         self.send_request(self.client.delete(&url)).await?;
@@ -323,15 +333,17 @@ mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
+    use parking_lot::Mutex;
+
     /// Mock implementation for testing.
     pub struct MockItemService {
-        items: std::sync::Mutex<Vec<Item>>,
+        items: Mutex<Vec<Item>>,
     }
 
     impl MockItemService {
         pub fn new() -> Self {
             Self {
-                items: std::sync::Mutex::new(Vec::new()),
+                items: Mutex::new(Vec::new()),
             }
         }
     }
@@ -339,7 +351,7 @@ mod tests {
     #[async_trait]
     impl ItemService for MockItemService {
         async fn list_for_user(&self, user_id: &str) -> Result<Vec<Item>, AppError> {
-            let items = self.items.lock().unwrap();
+            let items = self.items.lock();
             Ok(items
                 .iter()
                 .filter(|i| i.user_id == user_id)
@@ -348,7 +360,7 @@ mod tests {
         }
 
         async fn get(&self, id: &str, user_id: &str) -> Result<Option<Item>, AppError> {
-            let items = self.items.lock().unwrap();
+            let items = self.items.lock();
             Ok(items
                 .iter()
                 .find(|i| i.id == id && i.user_id == user_id)
@@ -364,7 +376,7 @@ mod tests {
                 created_at: Utc::now().to_rfc3339(),
                 updated_at: Utc::now().to_rfc3339(),
             };
-            self.items.lock().unwrap().push(item.clone());
+            self.items.lock().push(item.clone());
             Ok(item)
         }
 
@@ -374,7 +386,7 @@ mod tests {
             user_id: &str,
             data: &UpdateItemData,
         ) -> Result<Item, AppError> {
-            let mut items = self.items.lock().unwrap();
+            let mut items = self.items.lock();
             let item = items
                 .iter_mut()
                 .find(|i| i.id == id && i.user_id == user_id)
@@ -392,7 +404,7 @@ mod tests {
         }
 
         async fn delete(&self, id: &str, user_id: &str) -> Result<(), AppError> {
-            let mut items = self.items.lock().unwrap();
+            let mut items = self.items.lock();
             let pos = items
                 .iter()
                 .position(|i| i.id == id && i.user_id == user_id)

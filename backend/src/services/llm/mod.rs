@@ -3,7 +3,7 @@
 //! Provides text generation and embedding services via OpenAI and Anthropic.
 
 pub mod embedding;
-pub mod llm;
+pub mod text_generation;
 
 pub use embedding::{EmbeddingService, EmbeddingServiceFactory};
-pub use llm::{LlmService, LlmServiceFactory};
+pub use text_generation::{LlmService, LlmServiceFactory};

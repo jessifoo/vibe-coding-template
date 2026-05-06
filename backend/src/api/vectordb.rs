@@ -3,24 +3,24 @@
 //! Handles document storage and semantic search.
 
 use axum::{
-    extract::Json,
-    http::{header, HeaderMap, StatusCode},
+    extract::{Json, State},
+    http::{HeaderMap, StatusCode},
     routing::post,
     Router,
 };
 
+use crate::api::state::AppState;
+use crate::http_auth::bearer_token_from_headers;
 use crate::models::{
     AppError, DeleteDocumentsRequest, DocumentInput, DocumentUploadResponse, LlmProvider,
     SearchQuery, SearchResult,
 };
 use crate::services::llm::EmbeddingServiceFactory;
 use crate::services::supabase::SupabaseAuthService;
-use crate::services::vectordb::qdrant::{DocumentData, QdrantService, OWNER_ID_METADATA_KEY};
-use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use crate::services::vectordb::qdrant::DocumentData;
 
 /// Create the vector database router.
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/documents", post(add_documents).delete(delete_documents))
         .route("/search", post(search_documents))
@@ -31,6 +31,7 @@ pub fn router() -> Router {
 /// Creates embeddings for each document and stores them in Qdrant.
 #[axum::debug_handler]
 async fn add_documents(
+    State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<DocumentInput>,
 ) -> Result<Json<DocumentUploadResponse>, AppError> {
@@ -74,20 +75,13 @@ async fn add_documents(
     let metadata: Vec<_> = request
         .documents
         .iter()
-        .map(|d| {
-            let mut scoped_metadata = d.metadata.clone();
-            scoped_metadata.insert(
-                OWNER_ID_METADATA_KEY.to_string(),
-                JsonValue::String(user.id.clone()),
-            );
-            scoped_metadata
-        })
+        .map(|d| d.metadata.clone())
         .collect();
 
     // Add to vector database
-    let vector_db = QdrantService::new().await?;
+    let vector_db = &*state.qdrant;
     let document_ids = vector_db
-        .add_documents(&documents, &embeddings, Some(&metadata))
+        .add_documents(&user.id, &documents, &embeddings, Some(&metadata))
         .await?;
 
     tracing::info!(
@@ -104,6 +98,7 @@ async fn add_documents(
 /// Creates an embedding for the query and performs semantic search.
 #[axum::debug_handler]
 async fn search_documents(
+    State(state): State<AppState>,
     headers: HeaderMap,
     Json(query): Json<SearchQuery>,
 ) -> Result<Json<Vec<SearchResult>>, AppError> {
@@ -129,14 +124,14 @@ async fn search_documents(
         .create_embedding(&query.query_text, &query.embedding_model)
         .await?;
 
-    // Search vector database (always scoped to the authenticated user)
-    let scoped_filter = build_owner_scoped_filter(query.filter_metadata.as_ref(), &user.id);
-    let vector_db = QdrantService::new().await?;
+    // Search vector database
+    let vector_db = &*state.qdrant;
     let results = vector_db
         .search(
+            &user.id,
             &embedding_response.embedding,
             query.limit,
-            Some(&scoped_filter),
+            query.filter_metadata.as_ref(),
         )
         .await?;
 
@@ -152,6 +147,7 @@ async fn search_documents(
 /// Delete documents from the vector database.
 #[axum::debug_handler]
 async fn delete_documents(
+    State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<DeleteDocumentsRequest>,
 ) -> Result<StatusCode, AppError> {
@@ -169,10 +165,8 @@ async fn delete_documents(
     );
 
     // Delete from vector database
-    let vector_db = QdrantService::new().await?;
-    let success = vector_db
-        .delete_owned_documents(&request.document_ids, &user.id)
-        .await?;
+    let vector_db = &*state.qdrant;
+    let success = vector_db.delete(&user.id, &request.document_ids).await?;
 
     if success {
         tracing::info!(
@@ -190,27 +184,9 @@ async fn delete_documents(
 
 /// Authenticate user from request headers.
 async fn authenticate(headers: &HeaderMap) -> Result<crate::models::UserProfile, AppError> {
-    let token = extract_bearer_token(headers)?;
+    let token = bearer_token_from_headers(headers)?;
     let auth_service = SupabaseAuthService::new()?;
     auth_service.get_user(&token).await
-}
-
-/// Extract bearer token from Authorization header.
-fn extract_bearer_token(headers: &HeaderMap) -> Result<String, AppError> {
-    let auth_header = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| AppError::Unauthorized("Missing Authorization header".to_string()))?;
-
-    auth_header
-        .strip_prefix("Bearer ")
-        .or_else(|| auth_header.strip_prefix("bearer "))
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            AppError::Unauthorized(
-                "Invalid Authorization header format. Expected: Bearer <token>".to_string(),
-            )
-        })
 }
 
 /// Truncate string for logging (character-safe for UTF-8).
@@ -220,42 +196,5 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
         s.chars().take(max_len).collect::<String>() + "..."
-    }
-}
-
-fn build_owner_scoped_filter(
-    filter_metadata: Option<&HashMap<String, JsonValue>>,
-    user_id: &str,
-) -> HashMap<String, JsonValue> {
-    let mut scoped_filter = filter_metadata.cloned().unwrap_or_default();
-    scoped_filter.insert(
-        OWNER_ID_METADATA_KEY.to_string(),
-        JsonValue::String(user_id.to_string()),
-    );
-    scoped_filter
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn owner_scope_filter_is_always_enforced() {
-        let mut existing = HashMap::new();
-        existing.insert("topic".to_string(), JsonValue::String("rust".to_string()));
-        existing.insert(
-            OWNER_ID_METADATA_KEY.to_string(),
-            JsonValue::String("attacker-id".to_string()),
-        );
-
-        let filter = build_owner_scoped_filter(Some(&existing), "user-123");
-        assert_eq!(
-            filter.get(OWNER_ID_METADATA_KEY),
-            Some(&JsonValue::String("user-123".to_string()))
-        );
-        assert_eq!(
-            filter.get("topic"),
-            Some(&JsonValue::String("rust".to_string()))
-        );
     }
 }

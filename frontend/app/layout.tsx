@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Vibe coding Boilerplate Application',
-  description: 'A modern full-stack application with NextJS and FastAPI. Built for Vibe coding',
+  description: 'A modern full-stack application with NextJS and Rust Axum. Built for Vibe coding',
 };
 
 export default function RootLayout({

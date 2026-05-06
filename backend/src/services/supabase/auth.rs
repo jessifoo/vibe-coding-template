@@ -3,6 +3,8 @@
 //! Handles JWT token verification and user authentication via Supabase.
 
 use crate::config::SETTINGS;
+use crate::http_auth::bearer_token_from_value;
+use crate::http_error::read_failed_response_text;
 use crate::models::{AppError, SupabaseUser, UserProfile};
 use reqwest::Client;
 use serde::Deserialize;
@@ -56,10 +58,9 @@ impl SupabaseAuthService {
             .map_err(|e| AppError::ExternalService(format!("Supabase request failed: {e}")))?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::Unauthorized(format!(
-                "Invalid token (status: {status}): {error_text}"
+                "Invalid token (status: {status}): {body}"
             )));
         }
 
@@ -111,9 +112,9 @@ impl SupabaseAuthService {
             })?;
 
         if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::BadRequest(format!(
-                "Failed to authenticate with {provider}: {error_text}"
+                "Failed to authenticate with {provider} (status {status}): {body}"
             )));
         }
 
@@ -140,10 +141,7 @@ impl SupabaseAuthService {
 ///
 /// The token without the "Bearer " prefix, or an error if invalid.
 pub fn extract_bearer_token(header: &str) -> Result<&str, AppError> {
-    header
-        .strip_prefix("Bearer ")
-        .or_else(|| header.strip_prefix("bearer "))
-        .ok_or_else(|| AppError::Unauthorized("Invalid Authorization header format".to_string()))
+    bearer_token_from_value(header)
 }
 
 #[cfg(test)]
@@ -153,11 +151,11 @@ mod tests {
     #[test]
     fn test_extract_bearer_token() {
         assert_eq!(
-            extract_bearer_token("Bearer test_token").unwrap(),
+            extract_bearer_token("Bearer test_token").expect("bearer token"),
             "test_token"
         );
         assert_eq!(
-            extract_bearer_token("bearer test_token").unwrap(),
+            extract_bearer_token("bearer test_token").expect("bearer token"),
             "test_token"
         );
         assert!(extract_bearer_token("Basic test_token").is_err());
