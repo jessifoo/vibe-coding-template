@@ -334,7 +334,10 @@ Before marking any task complete, verify:
 **Backend** (port 8000):
 ```bash
 cd /workspace/backend
-cargo run
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 Requires `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` env vars (or `.env` at repo root).
 
@@ -348,7 +351,7 @@ Needs `frontend/.env.local` with `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABA
 
 ### Lint
 - Frontend: `cd frontend && npm run lint`
-- Backend: `cd backend && cargo clippy -- -D warnings`
+- Backend: `cd backend && source .venv/bin/activate && flake8`
 
 ### Key gotchas
 - The root `.env` file is loaded by the backend. When running the backend from `backend/` dir, env vars must be set explicitly or the `.env` must be in the CWD or passed via environment.
