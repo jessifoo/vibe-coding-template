@@ -295,7 +295,7 @@ Before marking any task complete, verify:
 - [ ] Public functions have doc comments
 - [ ] Logging added for important operations
 
-### TypeScript Frontend  
+### TypeScript Frontend
 - [ ] `npm run lint` passes
 - [ ] `npm run build` passes
 - [ ] No `any` types
@@ -324,3 +324,36 @@ Before marking any task complete, verify:
 - **Backend Rules**: `.cursor/rules/backend/`
 - **Frontend Rules**: `.cursor/rules/frontend/`
 - **Templates**: `.cursor/rules/templates/`
+
+---
+
+## Cursor Cloud specific instructions
+
+### Running services natively (without Docker)
+
+**Backend** (port 8000):
+```bash
+cd /workspace/backend
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+```
+Requires `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` env vars (or `.env` at repo root).
+
+**Frontend** (port 3000):
+```bash
+cd /workspace/frontend
+npm install
+npm run dev
+```
+Needs `frontend/.env.local` with `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL`.
+
+### Lint
+- Frontend: `cd frontend && npm run lint`
+- Backend: `cd backend && source .venv/bin/activate && flake8`
+
+### Key gotchas
+- The root `.env` file is loaded by the backend. When running the backend from `backend/` dir, env vars must be set explicitly or the `.env` must be in the CWD or passed via environment.
+- Supabase clients are lazily instantiated in service constructors, so the backend may start with placeholder credentials; actual Supabase calls will fail at request time.
+- Qdrant gracefully falls back to in-memory mode when `QDRANT_URL` is empty.
