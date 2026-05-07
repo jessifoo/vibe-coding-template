@@ -361,10 +361,7 @@ fn metadata_conditions(filter_params: Option<&HashMap<String, JsonValue>>) -> Ve
                 .iter()
                 .filter(|(key, _)| key.as_str() != OWNER_PAYLOAD_KEY)
                 .map(|(key, value)| {
-                    Condition::matches(
-                        key.as_str(),
-                        value.to_string().trim_matches('"').to_string(),
-                    )
+                    Condition::matches(key.as_str(), qdrant_payload_string_from_json(value))
                 })
                 .collect()
         })
@@ -460,6 +457,23 @@ mod tests {
         let stored = qdrant_payload_string_from_json(&JsonValue::String("user-123".to_string()));
 
         assert_eq!(stored, "user-123");
+    }
+
+    #[test]
+    fn scoped_filter_uses_raw_string_for_path_like_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "path".to_string(),
+            JsonValue::String(r"C:\tmp\file.txt".to_string()),
+        );
+
+        let filter = scoped_filter("user-a", Some(&metadata));
+
+        assert!(has_keyword_condition(
+            &filter.must,
+            "path",
+            r"C:\tmp\file.txt",
+        ));
     }
 
     fn has_keyword_condition(conditions: &[Condition], key: &str, value: &str) -> bool {
