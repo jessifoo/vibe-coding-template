@@ -27,6 +27,8 @@ pub trait LlmService: Send + Sync {
 
 ### OpenAI
 ```rust
+use crate::http_error::read_failed_response_text;
+
 pub struct OpenAiService {
     client: Client,
     api_key: String,
@@ -35,6 +37,7 @@ pub struct OpenAiService {
 impl OpenAiService {
     pub fn new(api_key: String) -> Result<Self, AppError> {
         let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| AppError::Configuration(e.to_string()))?;
         Ok(Self { client, api_key })
@@ -83,16 +86,48 @@ impl LlmService for OpenAiService {
             .await
             .map_err(|e| AppError::ExternalService(e.to_string()))?;
 
-        // Parse and return response
+        if !response.status().is_success() {
+            let (status, body) = read_failed_response_text(response).await?;
+            return Err(AppError::ExternalService(format!(
+                "OpenAI API error (status {status}): {body}"
+            )));
+        }
+
+        // Parse response (example - adjust to match actual OpenAI response structure)
+        let openai_response: OpenAiResponse = response.json().await
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))?;
+
+        Ok(TextGenerationResponse {
+            text: openai_response.choices[0].message.content.clone(),
+            model: model.to_string(),
+            usage: LlmUsage::completion(
+                openai_response.usage.prompt_tokens,
+                openai_response.usage.completion_tokens,
+            ),
+        })
     }
 }
 ```
 
 ### Anthropic
 ```rust
+use std::time::Duration;
+
+use crate::http_error::read_failed_response_text;
+
 pub struct AnthropicService {
     client: Client,
     api_key: String,
+}
+
+impl AnthropicService {
+    pub fn new(api_key: String) -> Result<Self, AppError> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()
+            .map_err(|e| AppError::Configuration(e.to_string()))?;
+        Ok(Self { client, api_key })
+    }
 }
 
 #[async_trait]
@@ -138,7 +173,25 @@ impl LlmService for AnthropicService {
             .await
             .map_err(|e| AppError::ExternalService(e.to_string()))?;
 
-        // Parse and return response
+        if !response.status().is_success() {
+            let (status, body) = read_failed_response_text(response).await?;
+            return Err(AppError::ExternalService(format!(
+                "Anthropic API error (status {status}): {body}"
+            )));
+        }
+
+        // Parse response (example - adjust to match actual Anthropic response structure)
+        let anthropic_response: AnthropicResponse = response.json().await
+            .map_err(|e| AppError::ExternalService(format!("Parse error: {e}")))?;
+
+        Ok(TextGenerationResponse {
+            text: anthropic_response.content[0].text.clone(),
+            model: model.to_string(),
+            usage: LlmUsage::completion(
+                anthropic_response.usage.input_tokens,
+                anthropic_response.usage.output_tokens,
+            ),
+        })
     }
 }
 ```
@@ -270,25 +323,26 @@ async fn generate_text(
 
 ## Error Handling
 
-Always handle API errors explicitly:
+Always handle API errors explicitly. Use the shared helper `read_failed_response_text` in `http_error.rs` for non-2xx responses so body-read errors propagate as `AppError::ExternalService` (do not use `unwrap_or_default()` on `response.text().await`).
 
 ```rust
-async fn call_openai(&self, request: &Request) -> Result<Response, AppError> {
+use crate::http_error::read_failed_response_text;
+
+async fn call_openai(&self, url: &str, request: &Request) -> Result<Response, AppError> {
     let response = self.client
         .post(url)
         .json(request)
         .send()
         .await
         .map_err(|e| AppError::ExternalService(format!("Request failed: {e}")))?;
-    
+
     if !response.status().is_success() {
-        let status = response.status();
-        let error = response.text().await.unwrap_or_default();
+        let (status, body) = read_failed_response_text(response).await?;
         return Err(AppError::ExternalService(format!(
-            "API error (status {status}): {error}"
+            "API error (status {status}): {body}"
         )));
     }
-    
+
     response
         .json()
         .await

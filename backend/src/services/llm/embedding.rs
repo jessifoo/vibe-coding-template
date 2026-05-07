@@ -3,6 +3,7 @@
 //! Currently supports OpenAI embeddings. Anthropic placeholder included for future support.
 
 use crate::config::SETTINGS;
+use crate::http_error::read_failed_response_text;
 use crate::models::{AppError, EmbeddingResponse, LlmProvider, LlmUsage};
 use async_trait::async_trait;
 use reqwest::Client;
@@ -99,10 +100,9 @@ impl EmbeddingService for OpenAiEmbeddingService {
             })?;
 
         if !response.status().is_success() {
-            let status = response.status();
-            let error = response.text().await.unwrap_or_default();
+            let (status, body) = read_failed_response_text(response).await?;
             return Err(AppError::ExternalService(format!(
-                "OpenAI embedding API error (status {status}): {error}"
+                "OpenAI embedding API error (status {status}): {body}"
             )));
         }
 
@@ -120,45 +120,12 @@ impl EmbeddingService for OpenAiEmbeddingService {
         Ok(EmbeddingResponse {
             embedding,
             model: model.to_string(),
-            usage: LlmUsage::embedding(openai_response.usage.prompt_tokens),
+            usage: LlmUsage {
+                prompt_tokens: openai_response.usage.prompt_tokens,
+                completion_tokens: None,
+                total_tokens: openai_response.usage.total_tokens,
+            },
         })
-    }
-}
-
-/// Anthropic embedding service (placeholder - Anthropic doesn't have dedicated embedding API yet).
-pub struct AnthropicEmbeddingService {
-    #[allow(dead_code)]
-    api_key: String,
-}
-
-impl AnthropicEmbeddingService {
-    /// Create a new Anthropic embedding service.
-    ///
-    /// Note: This is a placeholder as Anthropic doesn't currently offer a dedicated embedding API.
-    ///
-    /// # Arguments
-    ///
-    /// * `api_key` - Anthropic API key
-    #[must_use]
-    pub const fn new(api_key: String) -> Self {
-        Self { api_key }
-    }
-}
-
-#[async_trait]
-impl EmbeddingService for AnthropicEmbeddingService {
-    async fn create_embedding(
-        &self,
-        _text: &str,
-        _model: &str,
-    ) -> Result<EmbeddingResponse, AppError> {
-        // Anthropic doesn't currently have a dedicated embeddings API
-        // This returns an error directing users to use OpenAI for embeddings
-        Err(AppError::Configuration(
-            "Anthropic does not currently offer a dedicated embeddings API. \
-             Please use OpenAI (provider: 'openai') for embeddings."
-                .to_string(),
-        ))
     }
 }
 

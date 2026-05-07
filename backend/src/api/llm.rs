@@ -2,22 +2,18 @@
 //!
 //! Handles text generation and embedding creation.
 
-use axum::{
-    extract::Json,
-    http::{header, HeaderMap},
-    routing::post,
-    Router,
-};
+use axum::{extract::Json, http::HeaderMap, routing::post, Router};
 
+use crate::api::state::AppState;
+use crate::http_auth::bearer_token_from_headers;
 use crate::models::{
-    AppError, EmbeddingRequest, EmbeddingResponse, LlmProvider, TextGenerationRequest,
-    TextGenerationResponse,
+    AppError, EmbeddingRequest, EmbeddingResponse, TextGenerationRequest, TextGenerationResponse,
 };
 use crate::services::llm::{EmbeddingServiceFactory, LlmServiceFactory};
 use crate::services::supabase::SupabaseAuthService;
 
 /// Create the LLM router.
-pub fn router() -> Router {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/generate", post(generate_text))
         .route("/embedding", post(create_embedding))
@@ -92,15 +88,7 @@ async fn create_embedding(
         "Embedding creation requested"
     );
 
-    // Warn if using Anthropic (not supported)
-    if request.provider == LlmProvider::Anthropic {
-        return Err(AppError::BadRequest(
-            "Anthropic does not support embeddings. Please use OpenAI (provider: 'openai')."
-                .to_string(),
-        ));
-    }
-
-    // Get embedding service
+    // Get embedding service (factory rejects Anthropic for embeddings)
     let embedding_service = EmbeddingServiceFactory::get_service(request.provider)?;
 
     // Create embedding
@@ -120,27 +108,9 @@ async fn create_embedding(
 
 /// Authenticate user from request headers.
 async fn authenticate(headers: &HeaderMap) -> Result<crate::models::UserProfile, AppError> {
-    let token = extract_bearer_token(headers)?;
+    let token = bearer_token_from_headers(headers)?;
     let auth_service = SupabaseAuthService::new()?;
     auth_service.get_user(&token).await
-}
-
-/// Extract bearer token from Authorization header.
-fn extract_bearer_token(headers: &HeaderMap) -> Result<String, AppError> {
-    let auth_header = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| AppError::Unauthorized("Missing Authorization header".to_string()))?;
-
-    auth_header
-        .strip_prefix("Bearer ")
-        .or_else(|| auth_header.strip_prefix("bearer "))
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            AppError::Unauthorized(
-                "Invalid Authorization header format. Expected: Bearer <token>".to_string(),
-            )
-        })
 }
 
 /// Truncate string for logging (character-safe for UTF-8).
@@ -149,9 +119,6 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars()
-            .take(max_len)
-            .collect::<String>()
-            + "..."
+        s.chars().take(max_len).collect::<String>() + "..."
     }
 }

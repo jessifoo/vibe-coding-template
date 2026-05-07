@@ -1,0 +1,336 @@
+# Rust Axum Backend Standards
+
+> Apply these standards when working with backend Rust files.
+
+## Rust Backend Architecture
+
+The backend uses Rust with Axum framework for maximum type safety and compile-time guarantees.
+
+## Project Structure
+
+```
+backend/
+├── src/
+│   ├── main.rs           # Application entry point
+│   ├── lib.rs            # Library exports
+│   ├── api/              # API endpoint handlers
+│   │   ├── mod.rs        # Router configuration
+│   │   ├── auth.rs       # Authentication endpoints
+│   │   ├── llm.rs        # LLM endpoints
+│   │   └── vectordb.rs   # Vector database endpoints
+│   ├── config/           # Configuration management
+│   │   └── mod.rs        # Settings from environment
+│   ├── models/           # Data models
+│   │   ├── mod.rs        # Module exports
+│   │   ├── auth.rs       # Auth-related types
+│   │   ├── error.rs      # Error types
+│   │   ├── llm.rs        # LLM types
+│   │   └── vectordb.rs   # Vector DB types
+│   └── services/         # Business logic
+│       ├── mod.rs        # Module exports
+│       ├── llm/          # LLM services
+│       ├── supabase/     # Supabase services
+│       └── vectordb/     # Vector DB services
+├── Cargo.toml            # Dependencies
+├── Dockerfile            # Production image
+└── Dockerfile.dev        # Development image
+```
+
+## Endpoint Pattern
+
+Always use the `#[axum::debug_handler]` attribute for better error messages:
+
+```rust
+use axum::{extract::Json, http::HeaderMap, routing::post, Router};
+use validator::Validate;
+use crate::models::{AppError, CreateItemRequest, ItemResponse};
+use crate::api::state::AppState;
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/items", post(create_item))
+}
+
+/// Create a new item.
+#[axum::debug_handler]
+async fn create_item(
+    headers: HeaderMap,
+    Json(request): Json<CreateItemRequest>,
+) -> Result<Json<ItemResponse>, AppError> {
+    // 1. Authenticate
+    let user = authenticate(&headers).await?;
+
+    // 2. Validate
+    request.validate().map_err(AppError::from)?;
+
+    // 3. Execute business logic
+    let service = MyService::new()?;
+    let result = service.create_item(&request).await?;
+
+    // 4. Return response
+    Ok(Json(result))
+}
+```
+
+## Error Handling
+
+Use the `AppError` enum for all errors:
+
+```rust
+use thiserror::Error;
+use axum::http::StatusCode;
+
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error("Authentication failed: {0}")]
+    Unauthorized(String),
+    
+    #[error("Invalid request: {0}")]
+    BadRequest(String),
+    
+    #[error("Not found: {0}")]
+    NotFound(String),
+    
+    #[error("External service error: {0}")]
+    ExternalService(String),
+    
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+
+impl AppError {
+    pub const fn status_code(&self) -> StatusCode {
+        match self {
+            Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::NotFound(_) => StatusCode::NOT_FOUND,
+            Self::ExternalService(_) => StatusCode::BAD_GATEWAY,
+            Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let status = self.status_code();
+        let body = Json(json!({ "error": self.to_string() }));
+        (status, body).into_response()
+    }
+}
+```
+
+## Model Definitions
+
+Use serde for serialization and validator for validation:
+
+```rust
+use serde::{Deserialize, Serialize};
+use validator::Validate;
+
+/// Request to create an item.
+#[derive(Debug, Clone, Deserialize, Validate)]
+pub struct CreateItemRequest {
+    /// Item name
+    #[validate(length(min = 1, max = 100))]
+    pub name: String,
+
+    /// Optional description
+    pub description: Option<String>,
+
+    /// Item count (must be positive)
+    #[serde(default = "default_count")]
+    #[validate(range(min = 1, max = 1000))]
+    pub count: u32,
+}
+
+fn default_count() -> u32 { 1 }
+
+/// Response for item operations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemResponse {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub count: u32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+```
+
+## Service Layer
+
+Use traits for abstraction and testability:
+
+```rust
+use async_trait::async_trait;
+use crate::models::AppError;
+
+/// Trait for item services.
+#[async_trait]
+pub trait ItemService: Send + Sync {
+    async fn create(&self, request: &CreateItemRequest) -> Result<ItemResponse, AppError>;
+    async fn get(&self, id: &str) -> Result<Option<ItemResponse>, AppError>;
+    async fn list(&self) -> Result<Vec<ItemResponse>, AppError>;
+    async fn delete(&self, id: &str) -> Result<bool, AppError>;
+}
+
+/// Concrete implementation.
+pub struct SupabaseItemService {
+    client: Client,
+}
+
+#[async_trait]
+impl ItemService for SupabaseItemService {
+    async fn create(&self, request: &CreateItemRequest) -> Result<ItemResponse, AppError> {
+        // Implementation
+    }
+    // ... other methods
+}
+```
+
+## Configuration
+
+Use strong typing for configuration:
+
+```rust
+use once_cell::sync::Lazy;
+
+pub static SETTINGS: Lazy<Settings> = Lazy::new(|| {
+    Settings::from_env().unwrap_or_else(|e| {
+        eprintln!("Failed to load settings: {}", e);
+        std::process::exit(1);
+    })
+});
+
+#[derive(Debug, Clone)]
+pub struct Settings {
+    pub environment: Environment,
+    pub server: ServerConfig,
+    pub supabase: SupabaseConfig,
+    pub llm: LlmConfig,
+}
+
+impl Settings {
+    pub fn from_env() -> Result<Self, SettingsError> {
+        let _ = dotenvy::dotenv(); // Load .env if present
+
+        Ok(Self {
+            environment: env::var("ENVIRONMENT")
+                .unwrap_or_else(|_| "development".to_string())
+                .parse()?,
+            // ... other fields
+        })
+    }
+}
+```
+
+## Logging
+
+Use tracing for structured logging:
+
+```rust
+use tracing::{info, error, warn, debug};
+
+async fn process_request(user_id: &str, request: &Request) -> Result<Response, AppError> {
+    info!(user_id = %user_id, "Processing request");
+    
+    let result = service.process(request).await.map_err(|e| {
+        error!(user_id = %user_id, error = %e, "Request processing failed");
+        AppError::Internal(e.to_string())
+    })?;
+    
+    debug!(user_id = %user_id, result_id = %result.id, "Request completed");
+    
+    Ok(result)
+}
+```
+
+## Testing
+
+Write tests using Rust's built-in test framework:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::{Request, StatusCode}};
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_create_item() {
+        let app = create_app();
+        
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/items")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer test_token")
+                    .body(Body::from(r#"{"name":"test"}"#))
+                    .unwrap()
+            )
+            .await
+            .unwrap();
+        
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+}
+```
+
+## Clippy Lints
+
+The project enforces strict linting:
+
+```toml
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+```
+
+**Key rules:**
+- No `unsafe` code
+- No `.unwrap()` or `.expect()` - use proper error handling
+- All clippy warnings treated as errors in CI
+
+## Common Imports
+
+```rust
+// Standard library
+use std::collections::HashMap;
+
+// Axum
+use axum::{
+    extract::Json,
+    http::{header, HeaderMap, StatusCode},
+    response::IntoResponse,
+    routing::{get, post, delete},
+    Router,
+};
+
+// Serde
+use serde::{Deserialize, Serialize};
+
+// Error handling
+use thiserror::Error;
+use anyhow::Result;
+
+// Async
+use async_trait::async_trait;
+
+// Tracing
+use tracing::{info, error, warn, debug};
+
+// Validation
+use validator::Validate;
+
+// Internal
+use crate::config::SETTINGS;
+use crate::models::{AppError, UserProfile};
+use crate::services::supabase::SupabaseAuthService;
+```
