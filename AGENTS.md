@@ -324,3 +324,91 @@ Before marking any task complete, verify:
 - **Backend Rules**: `.cursor/rules/backend/`
 - **Frontend Rules**: `.cursor/rules/frontend/`
 - **Templates**: `.cursor/rules/templates/`
+
+---
+
+## Cursor Cloud specific instructions
+
+The cloud agent VM ships with the toolchain already installed:
+
+- **Rust** (`rustc` / `cargo`) on the system `PATH` (Rust 1.83 — meets the
+  `rust-version = "1.75"` MSRV declared in `backend/Cargo.toml`).
+- **Node.js 22** + `npm` symlinked into `/usr/local/bin` for the `root` user.
+- **`cargo-watch`** pre-installed for `make dev` / `cargo watch -x run`.
+- System libs needed for the build: `build-essential` and `pkg-config`. The
+  backend uses `reqwest` with `default-features = false` + `rustls-tls`, so
+  neither `libssl-dev` nor `libssl3` is required — `ldd target/debug/backend`
+  on the cloud VM links only `libgcc_s`, `libm`, `libc`, and `ld-linux`. If
+  you ever switch `reqwest`/`qdrant-client` to a native-tls backend, you will
+  need to add `libssl-dev` (build) and `libssl3` (runtime).
+
+### Running services natively (without Docker)
+
+**Backend** (port 8000):
+```bash
+cd /workspace/backend
+SUPABASE_URL=https://placeholder.supabase.co \
+SUPABASE_SERVICE_KEY=placeholder \
+cargo run
+```
+Or after a build, run the binary directly:
+```bash
+cd /workspace/backend && cargo build
+SUPABASE_URL=... SUPABASE_SERVICE_KEY=... ./target/debug/backend
+```
+The backend reads env vars at startup via `dotenvy::dotenv()` (see
+`backend/src/config/mod.rs`). It will load `/workspace/.env` automatically if
+present. `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are required; the process
+will panic on startup without them. Health check is `GET /` and returns
+`{"environment": "...", "status": "online", "version": "..."}`.
+
+**Frontend** (port 3000):
+```bash
+cd /workspace/frontend
+npm ci    # first time only; package-lock.json is committed
+npm run dev
+```
+Needs `frontend/.env.local` with `NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL`
+(usually `http://localhost:8000`).
+
+### Lint / format / test commands
+
+Backend (Rust):
+```bash
+cd /workspace/backend
+cargo check                       # quick type-check
+cargo clippy --all-targets -- -D warnings
+cargo fmt -- --check              # CI-style format check
+cargo fmt                         # apply formatting
+cargo test                        # run unit tests
+```
+
+Frontend (TypeScript):
+```bash
+cd /workspace/frontend
+npx next lint                     # ESLint via next/core-web-vitals
+npm run build                     # full type-check + production build
+```
+
+### Key gotchas
+
+- The repo uses a workspace-less single-crate Cargo project at `backend/`.
+  Run all `cargo` commands from `/workspace/backend`. The `target/` directory
+  is gitignored.
+- The first `cargo check` / `cargo build` on a fresh VM downloads ~400 crates
+  and takes a few minutes; subsequent builds are incremental.
+- `qdrant-client` is pinned to `=1.10.0` in `backend/Cargo.toml`. Do not bump
+  it without also bumping the project MSRV — newer versions require a newer
+  toolchain.
+- Supabase service clients are constructed lazily on first request, so the
+  backend boots fine with placeholder Supabase credentials; only requests that
+  hit Supabase will fail.
+- Qdrant gracefully falls back to in-memory mode when `QDRANT_URL` is empty
+  (see `backend/src/services/vectordb/qdrant.rs`).
+- The frontend `npm run build` can warn `getaddrinfo ENOTFOUND backend` while
+  prerendering `/api/health` — that route tries to reach the Docker hostname
+  `backend`. The build still succeeds and this is expected when running
+  natively without Docker.
+- Old Python artifacts (`backend/.venv/`, `backend/app/`, `requirements.txt`)
+  no longer exist on this branch — the backend is now Rust/Axum.

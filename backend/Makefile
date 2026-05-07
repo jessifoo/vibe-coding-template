@@ -55,12 +55,12 @@ audit: ## Run security audit on dependencies
 # Development setup
 setup: ## Install development tools
 	@echo "${GREEN}Installing development tools...${NC}"
-	cargo install cargo-watch
-	cargo install cargo-audit
-	cargo install cargo-edit
+	cargo install --locked cargo-watch || true
+	cargo install --locked cargo-audit || true
+	cargo install --locked cargo-edit || true
 
 # All checks (for CI)
-ci: fmt-check lint test ## Run all CI checks
+ci: fmt-check lint test audit ## Run all CI checks (incl. dependency audit)
 	@echo "${GREEN}All CI checks passed!${NC}"
 
 help: ## Show this help

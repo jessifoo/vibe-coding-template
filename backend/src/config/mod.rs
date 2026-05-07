@@ -6,6 +6,7 @@
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::env;
+use std::fmt;
 
 /// Global application settings, loaded once at startup.
 pub static SETTINGS: Lazy<Settings> = Lazy::new(|| {
@@ -15,8 +16,10 @@ pub static SETTINGS: Lazy<Settings> = Lazy::new(|| {
     })
 });
 
+const REDACTED: &str = "<REDACTED>";
+
 /// Application settings loaded from environment variables.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Settings {
     /// Application environment (development, staging, production)
     pub environment: Environment,
@@ -91,8 +94,21 @@ impl Default for CorsConfig {
     }
 }
 
+impl fmt::Debug for Settings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Settings")
+            .field("environment", &self.environment)
+            .field("server", &self.server)
+            .field("cors", &self.cors)
+            .field("supabase", &self.supabase)
+            .field("llm", &self.llm)
+            .field("qdrant", &self.qdrant)
+            .finish()
+    }
+}
+
 /// Supabase configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct SupabaseConfig {
     /// Supabase project URL
     pub url: String,
@@ -107,8 +123,19 @@ pub struct SupabaseConfig {
     pub jwt_secret: Option<String>,
 }
 
+impl fmt::Debug for SupabaseConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SupabaseConfig")
+            .field("url", &self.url)
+            .field("service_key", &REDACTED)
+            .field("anon_key", &self.anon_key.as_deref().map(|_| REDACTED))
+            .field("jwt_secret", &self.jwt_secret.as_deref().map(|_| REDACTED))
+            .finish()
+    }
+}
+
 /// LLM provider configuration.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Clone, Deserialize, Default)]
 pub struct LlmConfig {
     /// OpenAI API key
     pub openai_api_key: Option<String>,
@@ -123,7 +150,7 @@ impl LlmConfig {
     pub fn has_openai(&self) -> bool {
         self.openai_api_key
             .as_ref()
-            .map_or(false, |k| !k.is_empty())
+            .is_some_and(|k| !k.trim().is_empty())
     }
 
     /// Check if Anthropic is configured.
@@ -131,12 +158,35 @@ impl LlmConfig {
     pub fn has_anthropic(&self) -> bool {
         self.anthropic_api_key
             .as_ref()
-            .map_or(false, |k| !k.is_empty())
+            .is_some_and(|k| !k.trim().is_empty())
+    }
+}
+
+impl fmt::Debug for LlmConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LlmConfig")
+            .field(
+                "openai_api_key",
+                &self
+                    .openai_api_key
+                    .as_ref()
+                    .filter(|k| !k.trim().is_empty())
+                    .map(|_| REDACTED),
+            )
+            .field(
+                "anthropic_api_key",
+                &self
+                    .anthropic_api_key
+                    .as_ref()
+                    .filter(|k| !k.trim().is_empty())
+                    .map(|_| REDACTED),
+            )
+            .finish()
     }
 }
 
 /// Qdrant vector database configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct QdrantConfig {
     /// Qdrant server URL
     pub url: Option<String>,
@@ -155,6 +205,16 @@ impl Default for QdrantConfig {
             api_key: None,
             collection_name: "default_collection".to_string(),
         }
+    }
+}
+
+impl fmt::Debug for QdrantConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("QdrantConfig")
+            .field("url", &self.url)
+            .field("api_key", &self.api_key.as_deref().map(|_| REDACTED))
+            .field("collection_name", &self.collection_name)
+            .finish()
     }
 }
 
@@ -200,19 +260,37 @@ impl Settings {
         };
 
         // Parse Supabase config (required)
+        let supabase_url = env::var("SUPABASE_URL")
+            .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_URL".to_string()))?;
+        let supabase_url = supabase_url.trim().to_string();
+        if supabase_url.is_empty() {
+            return Err(SettingsError::InvalidValue("SUPABASE_URL cannot be empty or whitespace".to_string()));
+        }
+
+        let supabase_service_key = env::var("SUPABASE_SERVICE_KEY")
+            .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_SERVICE_KEY".to_string()))?;
+        let supabase_service_key = supabase_service_key.trim().to_string();
+        if supabase_service_key.is_empty() {
+            return Err(SettingsError::InvalidValue("SUPABASE_SERVICE_KEY cannot be empty or whitespace".to_string()));
+        }
+
         let supabase = SupabaseConfig {
-            url: env::var("SUPABASE_URL")
-                .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_URL".to_string()))?,
-            service_key: env::var("SUPABASE_SERVICE_KEY")
-                .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_SERVICE_KEY".to_string()))?,
+            url: supabase_url,
+            service_key: supabase_service_key,
             anon_key: env::var("SUPABASE_ANON_KEY").ok(),
             jwt_secret: env::var("SUPABASE_JWT_SECRET").ok(),
         };
 
-        // Parse LLM config (optional)
+        // Parse LLM config (optional); trim to reject whitespace-only keys
         let llm = LlmConfig {
-            openai_api_key: env::var("OPENAI_API_KEY").ok().filter(|s| !s.is_empty()),
-            anthropic_api_key: env::var("ANTHROPIC_API_KEY").ok().filter(|s| !s.is_empty()),
+            openai_api_key: env::var("OPENAI_API_KEY")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+            anthropic_api_key: env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
         };
 
         // Parse Qdrant config (optional)
@@ -314,6 +392,12 @@ mod tests {
             anthropic_api_key: None,
         };
         assert!(!empty_config.has_openai());
+
+        let whitespace = LlmConfig {
+            openai_api_key: Some("   \t  ".to_string()),
+            anthropic_api_key: None,
+        };
+        assert!(!whitespace.has_openai());
     }
 
     #[test]
@@ -330,5 +414,38 @@ mod tests {
             anthropic_api_key: Some(String::new()),
         };
         assert!(!empty_config.has_anthropic());
+
+        let whitespace = LlmConfig {
+            openai_api_key: None,
+            anthropic_api_key: Some("   \n  ".to_string()),
+        };
+        assert!(!whitespace.has_anthropic());
+    }
+
+    #[test]
+    fn config_debug_does_not_contain_secrets() {
+        let settings = Settings {
+            environment: Environment::Development,
+            server: ServerConfig::default(),
+            cors: CorsConfig::default(),
+            supabase: SupabaseConfig {
+                url: "https://x.supabase.co".to_string(),
+                service_key: "super-secret".to_string(),
+                anon_key: None,
+                jwt_secret: None,
+            },
+            llm: LlmConfig {
+                openai_api_key: Some("sk-openai".to_string()),
+                anthropic_api_key: None,
+            },
+            qdrant: QdrantConfig {
+                url: None,
+                api_key: None,
+                collection_name: "c".to_string(),
+            },
+        };
+        let dbg = format!("{settings:?}");
+        assert!(!dbg.contains("super-secret"), "{dbg}");
+        assert!(!dbg.contains("sk-openai"), "{dbg}");
     }
 }

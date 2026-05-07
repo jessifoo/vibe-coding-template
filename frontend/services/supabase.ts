@@ -1,4 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
+import {
+  createClient,
+  type AuthChangeEvent,
+  type Session,
+  type User,
+} from '@supabase/supabase-js';
 
 // Initialize the Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -57,14 +62,16 @@ export async function signOut() {
   return supabase.auth.signOut();
 }
 
-export async function getCurrentUser() {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function getCurrentUser(): Promise<User | null> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   return user;
 }
 
 // Session management
-export function onAuthStateChange(callback: (event: 'SIGNED_IN' | 'SIGNED_OUT' | 'USER_UPDATED', session: any) => void) {
-  return supabase.auth.onAuthStateChange((event, session) => {
-    callback(event as any, session);
-  });
+export function onAuthStateChange(
+  callback: (event: AuthChangeEvent, session: Session | null) => void
+) {
+  return supabase.auth.onAuthStateChange(callback);
 }

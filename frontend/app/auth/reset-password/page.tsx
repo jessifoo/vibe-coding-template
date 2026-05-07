@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/services/supabase';
 import Link from 'next/link';
+import { getErrorMessage } from '@/lib/errors';
 
 export default function ResetPassword() {
   const [password, setPassword] = useState('');
@@ -50,10 +51,13 @@ export default function ResetPassword() {
         router.push('/dashboard');
       }, 3000);
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       setMessage({
         type: 'error',
-        text: error.message || 'Failed to update password. Please try again.'
+        text: getErrorMessage(
+          error,
+          'Failed to update password. Please try again.'
+        ),
       });
     } finally {
       setLoading(false);
