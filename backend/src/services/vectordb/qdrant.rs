@@ -173,7 +173,9 @@ impl QdrantService {
 
                             payload.insert(
                                 key.clone(),
-                                qdrant_client::qdrant::Value::from(value.to_string()),
+                                qdrant_client::qdrant::Value::from(
+                                    qdrant_payload_string_from_json(value),
+                                ),
                             );
                         }
                     }
@@ -225,14 +227,13 @@ impl QdrantService {
 
         let filter = scoped_filter(owner_user_id, filter_params);
 
-        let mut search_builder = SearchPointsBuilder::new(
+        let search_builder = SearchPointsBuilder::new(
             &self.collection_name,
             query_embedding.to_vec(),
             limit as u64,
         )
-        .with_payload(true);
-
-        search_builder = search_builder.filter(filter);
+        .with_payload(true)
+        .filter(filter);
 
         let search_result = self
             .client
@@ -293,11 +294,9 @@ impl QdrantService {
         Ok(results)
     }
 
-    /// Delete documents by their IDs.
+    /// Delete documents by IDs only when they belong to the specified owner.
     ///
-    /// # Arguments
-    ///
-    /// * `ids` - Document IDs to delete
+    /// IDs that do not belong to the owner are ignored by the filter.
     ///
     /// # Errors
     ///
@@ -317,6 +316,7 @@ impl QdrantService {
 
         tracing::info!(
             collection = %self.collection_name,
+            owner_id = %owner_user_id,
             count = ids.len(),
             "Deleted documents from Qdrant"
         );
@@ -343,6 +343,13 @@ fn extract_string_value(value: &qdrant_client::qdrant::Value) -> Option<String> 
     }
 }
 
+fn qdrant_payload_string_from_json(value: &JsonValue) -> String {
+    match value {
+        JsonValue::String(value) => value.clone(),
+        _ => value.to_string(),
+    }
+}
+
 fn owner_condition(owner_user_id: &str) -> Condition {
     Condition::matches(OWNER_PAYLOAD_KEY, owner_user_id.to_string())
 }
@@ -354,10 +361,7 @@ fn metadata_conditions(filter_params: Option<&HashMap<String, JsonValue>>) -> Ve
                 .iter()
                 .filter(|(key, _)| key.as_str() != OWNER_PAYLOAD_KEY)
                 .map(|(key, value)| {
-                    Condition::matches(
-                        key.as_str(),
-                        value.to_string().trim_matches('"').to_string(),
-                    )
+                    Condition::matches(key.as_str(), qdrant_payload_string_from_json(value))
                 })
                 .collect()
         })
@@ -446,6 +450,30 @@ mod tests {
                 Some(ConditionOneOf::HasId(has_id)) => has_id.has_id.len() == ids.len(),
                 _ => false,
             }));
+    }
+
+    #[test]
+    fn string_metadata_is_stored_without_json_quotes() {
+        let stored = qdrant_payload_string_from_json(&JsonValue::String("user-123".to_string()));
+
+        assert_eq!(stored, "user-123");
+    }
+
+    #[test]
+    fn scoped_filter_uses_raw_string_for_path_like_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "path".to_string(),
+            JsonValue::String(r"C:\tmp\file.txt".to_string()),
+        );
+
+        let filter = scoped_filter("user-a", Some(&metadata));
+
+        assert!(has_keyword_condition(
+            &filter.must,
+            "path",
+            r"C:\tmp\file.txt",
+        ));
     }
 
     fn has_keyword_condition(conditions: &[Condition], key: &str, value: &str) -> bool {

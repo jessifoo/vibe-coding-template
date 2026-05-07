@@ -11,7 +11,7 @@ alwaysApply: false
 When setting up the project for the first time:
 
 1. **Run Setup Script**: `./first-time.sh`
-   - Checks for required tools (Docker, Make, Node.js, Python)
+   - Checks for required tools (Docker, Make, Node.js, Rust)
    - Guides through API key configuration
    - Generates .env files
 
