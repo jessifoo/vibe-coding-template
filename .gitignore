@@ -70,6 +70,13 @@ supabase/.temp
 **/*.rlib
 **/*.prof*
 
+# Python (legacy local artifacts; never commit — backend is Rust)
+backend/.venv/
+backend/app/
+**/__pycache__/
+*.py[cod]
+*.pyo
+
 # IDE / local tooling
 .idea/
 .vscode/*

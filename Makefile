@@ -2,6 +2,7 @@
 .PHONY: logs stop prod-logs prod-stop
 .PHONY: db-migration-new db-apply db-list db-push db-status
 .PHONY: install-frontend build-frontend install-backend build-backend test-backend lint-backend check-backend fmt-backend ci ci-full lint-frontend test-frontend verify-tracked
+.PHONY: verify-agent-toolchain agent-verify
 
 # Default target
 .DEFAULT_GOAL := help
@@ -61,9 +62,9 @@ clean: ## Remove containers and volumes
 	docker-compose -f docker-compose.prod.yml down -v
 
 # Frontend helpers
-install-frontend: ## Install frontend dependencies locally
+install-frontend: ## Install frontend dependencies (npm ci when lockfile exists)
 	@echo "${GREEN}Installing frontend dependencies...${NC}"
-	cd frontend && npm install
+	cd frontend && if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 build-frontend: ## Build frontend for production
 	@echo "${GREEN}Building frontend for production...${NC}"
@@ -136,6 +137,14 @@ ci: lint-backend test-backend ## Run backend CI (lint + test)
 
 ci-full: lint-backend test-backend lint-frontend test-frontend ## Run full-stack CI
 	@echo "${GREEN}Full CI checks passed!${NC}"
+
+# One-shot verification for cloud agents / fresh VMs (Node 20+, Rust, npm ci, fmt, clippy, tests, frontend build)
+verify-agent-toolchain: ## Verify toolchain and run full build+test (see scripts/verify-agent-toolchain.sh)
+	@chmod +x scripts/verify-agent-toolchain.sh 2>/dev/null || true
+	@./scripts/verify-agent-toolchain.sh
+
+agent-verify: verify-agent-toolchain ## Full non-interactive build+test gate for agents (see scripts/verify-agent-toolchain.sh)
+	@echo "${GREEN}agent-verify: OK${NC}"
 
 # Fail if build artifacts or dependencies were accidentally `git add`ed
 verify-tracked: ## Ensure git does not track node_modules, target/, .next, etc.

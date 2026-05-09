@@ -103,6 +103,14 @@ else
   print_message "Node.js is installed (${node_version})."
 fi
 
+# Check for npm (ships with Node; required for npm ci / lint / build)
+if ! command -v npm &> /dev/null; then
+  print_warning "npm not found. Install a Node.js distribution that includes npm."
+else
+  npm_version=$(npm -v)
+  print_message "npm is installed (${npm_version})."
+fi
+
 # Check for Make (the documented `make dev` workflow needs it)
 if ! command -v make &> /dev/null; then
   print_warning "Make not found. The 'make dev' / 'make prod' workflow won't work."
@@ -248,6 +256,9 @@ echo "This will start both the frontend and backend services."
 echo
 echo "For more commands, run:"
 echo -e "${GREEN}make help${NC}"
+echo
+print_message "Cloud agents / CI: after installing Node 20+ and Rust (rustup), run:"
+echo -e "  ${GREEN}./scripts/verify-agent-toolchain.sh${NC}   or   ${GREEN}make agent-verify${NC}"
 echo
 echo "Happy coding!"
 

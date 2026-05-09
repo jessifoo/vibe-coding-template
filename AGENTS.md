@@ -345,6 +345,34 @@ The cloud agent VM also typically includes:
   you ever switch `reqwest`/`qdrant-client` to a native-tls backend, you will
   need to add `libssl-dev` (build) and `libssl3` (runtime).
 
+### Provisioning a fresh Linux host (agents / CI)
+
+Minimal Debian/Ubuntu packages for **native** (non-Docker) builds:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  build-essential pkg-config curl git ca-certificates \
+  nodejs npm
+```
+
+- **Node.js**: install **20.9+** (see `frontend/package.json` `engines`). The
+  distro `nodejs` package may be too old; use [nodejs.org](https://nodejs.org/)
+  LTS installers, [NodeSource](https://github.com/nodesource/distributions), or
+  [nvm](https://github.com/nvm-sh/nvm) if needed. You must have both **`node`**
+  and **`npm`** on `PATH`.
+- **Rust**: install [rustup](https://rustup.rs/), then from the repo run
+  `cd backend && rustup show` so `backend/rust-toolchain.toml` installs the
+  pinned **stable** toolchain; `rustup component add rustfmt clippy` is
+  applied automatically by `./scripts/verify-agent-toolchain.sh`.
+
+After installing tools, run a full non-interactive gate from the repo root:
+
+```bash
+./scripts/verify-agent-toolchain.sh
+# or: make agent-verify
+```
+
 ### Running services natively (without Docker)
 
 **Backend** (port 8000):
