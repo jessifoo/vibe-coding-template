@@ -329,31 +329,53 @@ Before marking any task complete, verify:
 
 ## Cursor Cloud specific instructions
 
+The default VM `rustc` may lag behind this repo; the backend pins **stable**
+via `backend/rust-toolchain.toml`, so run `cargo` from `backend/` after
+`rustup` installs that toolchain. This matches `edition = "2024"` and
+`rust-version` in `backend/Cargo.toml`.
+
 ### Running services natively (without Docker)
 
 **Backend** (port 8000):
 ```bash
 cd /workspace/backend
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+SUPABASE_URL=https://placeholder.supabase.co \
+SUPABASE_SERVICE_KEY=placeholder \
+cargo run
 ```
-Requires `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` env vars (or `.env` at repo root).
+Requires `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` (or a `.env` discoverable
+from the process working directory).
 
 **Frontend** (port 3000):
 ```bash
 cd /workspace/frontend
-npm install
+npm ci
 npm run dev
 ```
-Needs `frontend/.env.local` with `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL`.
+Needs `frontend/.env.local` with `NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL`.
 
-### Lint
-- Frontend: `cd frontend && npm run lint`
-- Backend: `cd backend && source .venv/bin/activate && flake8`
+### Lint / format / test commands
+
+Backend (Rust):
+```bash
+cd /workspace/backend
+cargo fmt -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+Frontend (TypeScript):
+```bash
+cd /workspace/frontend
+npm run lint
+npm run build
+```
 
 ### Key gotchas
-- The root `.env` file is loaded by the backend. When running the backend from `backend/` dir, env vars must be set explicitly or the `.env` must be in the CWD or passed via environment.
-- Supabase clients are lazily instantiated in service constructors, so the backend may start with placeholder credentials; actual Supabase calls will fail at request time.
+
+- The root `.env` is picked up when present; if you run only from `backend/`,
+  set env vars explicitly or place `.env` accordingly.
+- Supabase clients are created lazily in places; the process may start with
+  placeholders until requests hit Supabase.
 - Qdrant gracefully falls back to in-memory mode when `QDRANT_URL` is empty.
