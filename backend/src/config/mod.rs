@@ -3,16 +3,23 @@
 //! Handles loading and validating all environment variables and configuration
 //! settings. Uses strong typing to prevent misconfiguration at runtime.
 
-use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::env;
 use std::fmt;
+use std::sync::LazyLock;
 
 /// Global application settings, loaded once at startup.
-pub static SETTINGS: Lazy<Settings> = Lazy::new(|| {
+///
+/// # Panics
+///
+/// Panics if required environment variables (`SUPABASE_URL`,
+/// `SUPABASE_SERVICE_KEY`) are missing or invalid. This is intentional:
+/// the process cannot meaningfully serve traffic without valid settings,
+/// and the panic surfaces during startup rather than per request.
+pub static SETTINGS: LazyLock<Settings> = LazyLock::new(|| {
     Settings::from_env().unwrap_or_else(|e| {
-        eprintln!("Failed to load settings: {}", e);
-        panic!("Failed to load settings: {}", e);
+        eprintln!("Failed to load settings: {e}");
+        panic!("Failed to load settings: {e}");
     })
 });
 
@@ -264,14 +271,18 @@ impl Settings {
             .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_URL".to_string()))?;
         let supabase_url = supabase_url.trim().to_string();
         if supabase_url.is_empty() {
-            return Err(SettingsError::InvalidValue("SUPABASE_URL cannot be empty or whitespace".to_string()));
+            return Err(SettingsError::InvalidValue(
+                "SUPABASE_URL cannot be empty or whitespace".to_string(),
+            ));
         }
 
         let supabase_service_key = env::var("SUPABASE_SERVICE_KEY")
             .map_err(|_| SettingsError::MissingEnvVar("SUPABASE_SERVICE_KEY".to_string()))?;
         let supabase_service_key = supabase_service_key.trim().to_string();
         if supabase_service_key.is_empty() {
-            return Err(SettingsError::InvalidValue("SUPABASE_SERVICE_KEY cannot be empty or whitespace".to_string()));
+            return Err(SettingsError::InvalidValue(
+                "SUPABASE_SERVICE_KEY cannot be empty or whitespace".to_string(),
+            ));
         }
 
         let supabase = SupabaseConfig {

@@ -2,7 +2,7 @@
 # Run with: cargo fmt
 
 # Edition
-edition = "2021"
+edition = "2024"
 
 # Line width
 max_width = 100

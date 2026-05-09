@@ -1,13 +1,22 @@
 //! LLM text generation service.
 //!
-//! Supports OpenAI and Anthropic for text generation with a unified interface.
+//! Supports OpenAI (via the typed [`async_openai`] SDK) and Anthropic
+//! (via raw `reqwest`, as there is no official Rust SDK) behind a unified
+//! [`LlmService`] trait. Implementations are kept behind the trait so they
+//! remain mockable in tests and swappable at runtime.
+
+use async_openai::{
+    Client as OpenAIClient,
+    config::OpenAIConfig,
+    types::{ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs},
+};
+use async_trait::async_trait;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 
 use crate::config::SETTINGS;
 use crate::http_error::read_failed_response_text;
 use crate::models::{AppError, LlmProvider, LlmUsage, TextGenerationResponse};
-use async_trait::async_trait;
-use reqwest::Client;
-use serde::{Deserialize, Serialize};
 
 /// Trait for LLM text generation services.
 #[async_trait]
@@ -33,29 +42,25 @@ pub trait LlmService: Send + Sync {
     ) -> Result<TextGenerationResponse, AppError>;
 }
 
-/// OpenAI text generation service.
+// ---------------------------------------------------------------------------
+// OpenAI (via async-openai typed SDK)
+// ---------------------------------------------------------------------------
+
+/// OpenAI text-generation service backed by the [`async_openai`] SDK.
 pub struct OpenAiService {
-    client: Client,
-    api_key: String,
+    client: OpenAIClient<OpenAIConfig>,
 }
 
 impl OpenAiService {
     /// Create a new OpenAI service.
     ///
-    /// # Arguments
-    ///
-    /// * `api_key` - OpenAI API key
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the HTTP client cannot be created.
-    pub fn new(api_key: String) -> Result<Self, AppError> {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .map_err(|e| AppError::Configuration(format!("Failed to create HTTP client: {e}")))?;
-
-        Ok(Self { client, api_key })
+    /// The SDK owns its HTTP client and retry logic; we only supply the API key.
+    #[must_use]
+    pub fn new(api_key: &str) -> Self {
+        let config = OpenAIConfig::new().with_api_key(api_key);
+        Self {
+            client: OpenAIClient::with_config(config),
+        }
     }
 }
 
@@ -68,90 +73,50 @@ impl LlmService for OpenAiService {
         max_tokens: u32,
         temperature: f32,
     ) -> Result<TextGenerationResponse, AppError> {
-        #[derive(Serialize)]
-        struct ChatMessage<'a> {
-            role: &'a str,
-            content: &'a str,
-        }
+        let message = ChatCompletionRequestUserMessageArgs::default()
+            .content(prompt)
+            .build()
+            .map_err(|e| AppError::BadRequest(format!("Failed to build message: {e}")))?;
 
-        #[derive(Serialize)]
-        struct OpenAiRequest<'a> {
-            model: &'a str,
-            messages: Vec<ChatMessage<'a>>,
-            max_tokens: u32,
-            temperature: f32,
-        }
-
-        #[derive(Deserialize)]
-        struct OpenAiResponse {
-            choices: Vec<Choice>,
-            usage: Usage,
-        }
-
-        #[derive(Deserialize)]
-        struct Choice {
-            message: MessageContent,
-        }
-
-        #[derive(Deserialize)]
-        struct MessageContent {
-            content: String,
-        }
-
-        #[derive(Deserialize)]
-        struct Usage {
-            prompt_tokens: u32,
-            completion_tokens: u32,
-        }
-
-        let request = OpenAiRequest {
-            model,
-            messages: vec![ChatMessage {
-                role: "user",
-                content: prompt,
-            }],
-            max_tokens,
-            temperature,
-        };
+        let request = CreateChatCompletionRequestArgs::default()
+            .model(model)
+            .max_tokens(max_tokens)
+            .temperature(temperature)
+            .messages(vec![message.into()])
+            .build()
+            .map_err(|e| AppError::BadRequest(format!("Failed to build request: {e}")))?;
 
         let response = self
             .client
-            .post("https://api.openai.com/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
+            .chat()
+            .create(request)
             .await
-            .map_err(|e| AppError::ExternalService(format!("OpenAI request failed: {e}")))?;
+            .map_err(|e| AppError::ExternalService(format!("OpenAI API error: {e}")))?;
 
-        if !response.status().is_success() {
-            let (status, body) = read_failed_response_text(response).await?;
-            return Err(AppError::ExternalService(format!(
-                "OpenAI API error (status {status}): {body}"
-            )));
-        }
-
-        let openai_response: OpenAiResponse = response.json().await.map_err(|e| {
-            AppError::ExternalService(format!("Failed to parse OpenAI response: {e}"))
-        })?;
-
-        let text = openai_response
+        let choice = response
             .choices
             .into_iter()
             .next()
-            .map(|c| c.message.content)
             .ok_or_else(|| AppError::ExternalService("No response from OpenAI".to_string()))?;
+
+        let text = choice.message.content.unwrap_or_default();
+
+        let usage = response.usage.map_or_else(
+            || LlmUsage::completion(0, 0),
+            |u| LlmUsage::completion(u.prompt_tokens, u.completion_tokens),
+        );
 
         Ok(TextGenerationResponse {
             text,
-            model: model.to_string(),
-            usage: LlmUsage::completion(
-                openai_response.usage.prompt_tokens,
-                openai_response.usage.completion_tokens,
-            ),
+            model: response.model,
+            usage,
         })
     }
 }
+
+// ---------------------------------------------------------------------------
+// Anthropic (raw reqwest — no official Rust SDK)
+// ---------------------------------------------------------------------------
 
 /// Anthropic (Claude) text generation service.
 pub struct AnthropicService {
@@ -288,20 +253,23 @@ impl LlmServiceFactory {
                 let api_key = SETTINGS
                     .llm
                     .openai_api_key
-                    .clone()
+                    .as_deref()
+                    .map(str::trim)
                     .filter(|k| !k.is_empty())
                     .ok_or_else(|| {
                         AppError::Configuration(
                             "OpenAI API key not configured. Please set OPENAI_API_KEY.".to_string(),
                         )
                     })?;
-                Ok(Box::new(OpenAiService::new(api_key)?))
+                Ok(Box::new(OpenAiService::new(api_key)))
             }
             LlmProvider::Anthropic => {
                 let api_key = SETTINGS
                     .llm
                     .anthropic_api_key
-                    .clone()
+                    .as_deref()
+                    .map(str::trim)
+                    .map(str::to_string)
                     .filter(|k| !k.is_empty())
                     .ok_or_else(|| {
                         AppError::Configuration(

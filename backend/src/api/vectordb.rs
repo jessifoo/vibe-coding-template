@@ -3,10 +3,10 @@
 //! Handles document storage and semantic search.
 
 use axum::{
+    Router,
     extract::{Json, State},
     http::{HeaderMap, StatusCode},
     routing::post,
-    Router,
 };
 
 use crate::api::state::AppState;

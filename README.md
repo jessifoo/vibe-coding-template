@@ -73,7 +73,7 @@ This template includes comprehensive **Cursor Rules** and **Agent Instructions**
 - Docker and Docker Compose
 - Make
 - Node.js 18+ (for local frontend development)
-- Rust 1.75+ (for local backend development)
+- Rust **stable** ([rustup](https://rustup.rs/); `backend/rust-toolchain.toml` pins the channel — run `cargo` from `backend/`)
 - Supabase CLI (for database migrations, install with `brew install supabase/tap/supabase` or see [Supabase CLI docs](https://supabase.com/docs/guides/cli))
 
 ### Quick Start

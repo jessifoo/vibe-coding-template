@@ -295,7 +295,7 @@ Before marking any task complete, verify:
 - [ ] Public functions have doc comments
 - [ ] Logging added for important operations
 
-### TypeScript Frontend  
+### TypeScript Frontend
 - [ ] `npm run lint` passes
 - [ ] `npm run build` passes
 - [ ] No `any` types
@@ -329,10 +329,13 @@ Before marking any task complete, verify:
 
 ## Cursor Cloud specific instructions
 
-The cloud agent VM ships with the toolchain already installed:
+The default VM `rustc` may lag behind this repo. The backend pins **stable**
+via `backend/rust-toolchain.toml` (run `cargo` from `backend/` after `rustup`
+installs that toolchain). This matches `edition = "2024"` and `rust-version`
+in `backend/Cargo.toml`.
 
-- **Rust** (`rustc` / `cargo`) on the system `PATH` (Rust 1.83 — meets the
-  `rust-version = "1.75"` MSRV declared in `backend/Cargo.toml`).
+The cloud agent VM also typically includes:
+
 - **Node.js 22** + `npm` symlinked into `/usr/local/bin` for the `root` user.
 - **`cargo-watch`** pre-installed for `make dev` / `cargo watch -x run`.
 - System libs needed for the build: `build-essential` and `pkg-config`. The
@@ -358,8 +361,9 @@ SUPABASE_URL=... SUPABASE_SERVICE_KEY=... ./target/debug/backend
 ```
 The backend reads env vars at startup via `dotenvy::dotenv()` (see
 `backend/src/config/mod.rs`). It will load `/workspace/.env` automatically if
-present. `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are required; the process
-will panic on startup without them. Health check is `GET /` and returns
+present when the working directory allows it. `SUPABASE_URL` and
+`SUPABASE_SERVICE_KEY` are required; the process will panic on startup without
+them. Health check is `GET /` and returns
 `{"environment": "...", "status": "online", "version": "..."}`.
 
 **Frontend** (port 3000):
@@ -381,14 +385,14 @@ cargo check                       # quick type-check
 cargo clippy --all-targets -- -D warnings
 cargo fmt -- --check              # CI-style format check
 cargo fmt                         # apply formatting
-cargo test                        # run unit tests
+cargo test                        # run unit + integration tests
 ```
 
 Frontend (TypeScript):
 ```bash
 cd /workspace/frontend
-npx next lint                     # ESLint via next/core-web-vitals
-npm run build                     # full type-check + production build
+npm run lint
+npm run build
 ```
 
 ### Key gotchas
@@ -396,14 +400,15 @@ npm run build                     # full type-check + production build
 - The repo uses a workspace-less single-crate Cargo project at `backend/`.
   Run all `cargo` commands from `/workspace/backend`. The `target/` directory
   is gitignored.
-- The first `cargo check` / `cargo build` on a fresh VM downloads ~400 crates
+- The first `cargo check` / `cargo build` on a fresh VM downloads many crates
   and takes a few minutes; subsequent builds are incremental.
-- `qdrant-client` is pinned to `=1.10.0` in `backend/Cargo.toml`. Do not bump
-  it without also bumping the project MSRV — newer versions require a newer
-  toolchain.
+- The root `.env` is picked up when present; if you run only from `backend/`,
+  set env vars explicitly or place `.env` accordingly.
+- `qdrant-client` is declared as `1` in `backend/Cargo.toml` (semver-compatible
+  releases). Do not bump without checking MSRV notes on the crate and this repo.
 - Supabase service clients are constructed lazily on first request, so the
-  backend boots fine with placeholder Supabase credentials; only requests that
-  hit Supabase will fail.
+  backend may boot with placeholder Supabase credentials; only requests that
+  hit Supabase will fail until keys are valid.
 - Qdrant gracefully falls back to in-memory mode when `QDRANT_URL` is empty
   (see `backend/src/services/vectordb/qdrant.rs`).
 - The frontend `npm run build` can warn `getaddrinfo ENOTFOUND backend` while
@@ -411,4 +416,4 @@ npm run build                     # full type-check + production build
   `backend`. The build still succeeds and this is expected when running
   natively without Docker.
 - Old Python artifacts (`backend/.venv/`, `backend/app/`, `requirements.txt`)
-  no longer exist on this branch — the backend is now Rust/Axum.
+  no longer exist on this branch — the backend is Rust/Axum.

@@ -33,9 +33,11 @@ impl AppState {
         let reqwest_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .map_err(|e| AppRunError::QdrantInit(
-                crate::models::AppError::Configuration(format!("Failed to create HTTP client: {e}"))
-            ))?;
+            .map_err(|e| {
+                AppRunError::QdrantInit(crate::models::AppError::Configuration(format!(
+                    "Failed to create HTTP client: {e}"
+                )))
+            })?;
 
         Ok(Self {
             qdrant: Arc::new(qdrant),

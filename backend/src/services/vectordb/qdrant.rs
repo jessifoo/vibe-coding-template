@@ -4,11 +4,11 @@
 
 use crate::config::SETTINGS;
 use crate::models::{AppError, DocumentContent, SearchResult};
+use qdrant_client::Qdrant;
 use qdrant_client::qdrant::{
     Condition, CreateCollectionBuilder, DeletePointsBuilder, Distance, Filter, PointId,
     PointStruct, SearchPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
 };
-use qdrant_client::Qdrant;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -443,13 +443,15 @@ mod tests {
             OWNER_PAYLOAD_KEY,
             "user-a"
         ));
-        assert!(filter
-            .must
-            .iter()
-            .any(|condition| match &condition.condition_one_of {
-                Some(ConditionOneOf::HasId(has_id)) => has_id.has_id.len() == ids.len(),
-                _ => false,
-            }));
+        assert!(
+            filter
+                .must
+                .iter()
+                .any(|condition| match &condition.condition_one_of {
+                    Some(ConditionOneOf::HasId(has_id)) => has_id.has_id.len() == ids.len(),
+                    _ => false,
+                })
+        );
     }
 
     #[test]
