@@ -2,15 +2,20 @@
 //!
 //! Handles text generation and embedding creation.
 
-use axum::{Router, extract::Json, http::HeaderMap, routing::post};
+use axum::{
+    Router,
+    extract::{Json, State},
+    http::HeaderMap,
+    routing::post,
+};
 
+use crate::api::auth_handler::authenticated_user_from_headers;
+use crate::api::logging::truncate_for_log;
 use crate::api::state::AppState;
-use crate::http_auth::bearer_token_from_headers;
 use crate::models::{
     AppError, EmbeddingRequest, EmbeddingResponse, TextGenerationRequest, TextGenerationResponse,
 };
 use crate::services::llm::{EmbeddingServiceFactory, LlmServiceFactory};
-use crate::services::supabase::SupabaseAuthService;
 
 /// Create the LLM router.
 pub fn router() -> Router<AppState> {
@@ -24,11 +29,11 @@ pub fn router() -> Router<AppState> {
 /// Requires authentication. Supports OpenAI and Anthropic providers.
 #[axum::debug_handler]
 async fn generate_text(
+    State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<TextGenerationRequest>,
 ) -> Result<Json<TextGenerationResponse>, AppError> {
-    // Authenticate user
-    let user = authenticate(&headers).await?;
+    let user = authenticated_user_from_headers(&headers, &state).await?;
 
     // Validate request
     use validator::Validate;
@@ -38,7 +43,7 @@ async fn generate_text(
         user_id = %user.id,
         provider = %request.provider,
         model = %request.model,
-        prompt_preview = %truncate(&request.prompt, 50),
+        prompt_preview = %truncate_for_log(&request.prompt, 50),
         "Text generation requested"
     );
 
@@ -70,11 +75,11 @@ async fn generate_text(
 /// Requires authentication. Currently only supports OpenAI embeddings.
 #[axum::debug_handler]
 async fn create_embedding(
+    State(state): State<AppState>,
     headers: HeaderMap,
     Json(request): Json<EmbeddingRequest>,
 ) -> Result<Json<EmbeddingResponse>, AppError> {
-    // Authenticate user
-    let user = authenticate(&headers).await?;
+    let user = authenticated_user_from_headers(&headers, &state).await?;
 
     // Validate request
     use validator::Validate;
@@ -104,21 +109,4 @@ async fn create_embedding(
     );
 
     Ok(Json(response))
-}
-
-/// Authenticate user from request headers.
-async fn authenticate(headers: &HeaderMap) -> Result<crate::models::UserProfile, AppError> {
-    let token = bearer_token_from_headers(headers)?;
-    let auth_service = SupabaseAuthService::new()?;
-    auth_service.get_user(&token).await
-}
-
-/// Truncate string for logging (character-safe for UTF-8).
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars().take(max_len).collect::<String>() + "..."
-    }
 }

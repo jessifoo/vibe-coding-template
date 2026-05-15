@@ -3,7 +3,9 @@
 //! Contains all HTTP endpoint handlers organized by domain.
 
 pub mod auth;
+pub(crate) mod auth_handler;
 pub mod llm;
+pub(crate) mod logging;
 pub mod state;
 pub mod vectordb;
 

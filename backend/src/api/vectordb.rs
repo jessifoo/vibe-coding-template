@@ -9,14 +9,14 @@ use axum::{
     routing::post,
 };
 
+use crate::api::auth_handler::authenticated_user_from_headers;
+use crate::api::logging::truncate_for_log;
 use crate::api::state::AppState;
-use crate::http_auth::bearer_token_from_headers;
 use crate::models::{
     AppError, DeleteDocumentsRequest, DocumentInput, DocumentUploadResponse, LlmProvider,
     SearchQuery, SearchResult,
 };
 use crate::services::llm::EmbeddingServiceFactory;
-use crate::services::supabase::SupabaseAuthService;
 use crate::services::vectordb::qdrant::DocumentData;
 
 /// Create the vector database router.
@@ -35,8 +35,7 @@ async fn add_documents(
     headers: HeaderMap,
     Json(request): Json<DocumentInput>,
 ) -> Result<Json<DocumentUploadResponse>, AppError> {
-    // Authenticate user
-    let user = authenticate(&headers).await?;
+    let user = authenticated_user_from_headers(&headers, &state).await?;
 
     // Validate request
     use validator::Validate;
@@ -102,8 +101,7 @@ async fn search_documents(
     headers: HeaderMap,
     Json(query): Json<SearchQuery>,
 ) -> Result<Json<Vec<SearchResult>>, AppError> {
-    // Authenticate user
-    let user = authenticate(&headers).await?;
+    let user = authenticated_user_from_headers(&headers, &state).await?;
 
     // Validate request
     use validator::Validate;
@@ -111,7 +109,7 @@ async fn search_documents(
 
     tracing::info!(
         user_id = %user.id,
-        query_preview = %truncate(&query.query_text, 50),
+        query_preview = %truncate_for_log(&query.query_text, 50),
         limit = query.limit,
         "Searching vector database"
     );
@@ -151,8 +149,7 @@ async fn delete_documents(
     headers: HeaderMap,
     Json(request): Json<DeleteDocumentsRequest>,
 ) -> Result<StatusCode, AppError> {
-    // Authenticate user
-    let user = authenticate(&headers).await?;
+    let user = authenticated_user_from_headers(&headers, &state).await?;
 
     // Validate request
     use validator::Validate;
@@ -179,22 +176,5 @@ async fn delete_documents(
         Err(AppError::BadRequest(
             "Failed to delete one or more documents".to_string(),
         ))
-    }
-}
-
-/// Authenticate user from request headers.
-async fn authenticate(headers: &HeaderMap) -> Result<crate::models::UserProfile, AppError> {
-    let token = bearer_token_from_headers(headers)?;
-    let auth_service = SupabaseAuthService::new()?;
-    auth_service.get_user(&token).await
-}
-
-/// Truncate string for logging (character-safe for UTF-8).
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        // Use character boundaries to avoid panics on multi-byte UTF-8
-        s.chars().take(max_len).collect::<String>() + "..."
     }
 }

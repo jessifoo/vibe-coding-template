@@ -5,6 +5,8 @@
 
 use std::sync::Arc;
 
+use crate::application::auth::AuthUseCase;
+use crate::infrastructure::supabase::auth_gateway::SupabaseAuthGateway;
 use crate::models::AppRunError;
 use crate::services::vectordb::qdrant::QdrantService;
 
@@ -16,6 +18,9 @@ pub struct AppState {
 
     /// Shared HTTP client for making external requests.
     pub reqwest_client: Arc<reqwest::Client>,
+
+    /// Shared auth use-case (single auth entrypoint for protected APIs).
+    pub auth_use_case: Arc<AuthUseCase>,
 }
 
 impl AppState {
@@ -39,9 +44,14 @@ impl AppState {
                 )))
             })?;
 
+        let reqwest_client = Arc::new(reqwest_client);
+        let auth_gateway = SupabaseAuthGateway::new(Arc::clone(&reqwest_client));
+        let auth_use_case = Arc::new(AuthUseCase::new(Arc::new(auth_gateway)));
+
         Ok(Self {
             qdrant: Arc::new(qdrant),
-            reqwest_client: Arc::new(reqwest_client),
+            reqwest_client,
+            auth_use_case,
         })
     }
 }
