@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 
 use crate::config::SETTINGS;
@@ -30,6 +30,44 @@ impl SupabaseAuthGateway {
     }
 }
 
+fn map_user_lookup_error(status: StatusCode) -> AuthDomainError {
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return AuthDomainError::Unauthorized("Invalid bearer token".to_string());
+    }
+
+    if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+        return AuthDomainError::ExternalService(format!(
+            "Supabase auth service unavailable (status {status})"
+        ));
+    }
+
+    if status.is_client_error() {
+        return AuthDomainError::BadRequest(format!(
+            "Supabase auth request rejected (status {status})"
+        ));
+    }
+
+    AuthDomainError::ExternalService(format!("Supabase auth failed (status {status})"))
+}
+
+fn map_provider_exchange_error(status: StatusCode, provider: &str) -> AuthDomainError {
+    if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+        return AuthDomainError::ExternalService(format!(
+            "Provider token exchange failed for {provider} (status {status})"
+        ));
+    }
+
+    if status.is_client_error() {
+        return AuthDomainError::BadRequest(format!(
+            "Failed to authenticate with {provider} (status {status})"
+        ));
+    }
+
+    AuthDomainError::ExternalService(format!(
+        "Provider token exchange failed for {provider} (status {status})"
+    ))
+}
+
 #[async_trait]
 impl AuthGateway for SupabaseAuthGateway {
     async fn get_user_from_bearer_token(
@@ -51,14 +89,8 @@ impl AuthGateway for SupabaseAuthGateway {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.map_err(|e| {
-                AuthDomainError::ExternalService(format!(
-                    "Supabase auth failed (status {status}) and body could not be read: {e}"
-                ))
-            })?;
-            return Err(AuthDomainError::Unauthorized(format!(
-                "Invalid token (status: {status}): {body}"
-            )));
+            tracing::warn!(status = %status, "Supabase bearer token lookup failed");
+            return Err(map_user_lookup_error(status));
         }
 
         let user: SupabaseUserRecord = response.json().await.map_err(|e| {
@@ -98,14 +130,12 @@ impl AuthGateway for SupabaseAuthGateway {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.map_err(|e| {
-                AuthDomainError::ExternalService(format!(
-                    "Provider exchange failed (status {status}) and body could not be read: {e}"
-                ))
-            })?;
-            return Err(AuthDomainError::BadRequest(format!(
-                "Failed to authenticate with {provider} (status {status}): {body}"
-            )));
+            tracing::warn!(
+                provider = provider,
+                status = %status,
+                "Supabase provider token exchange failed"
+            );
+            return Err(map_provider_exchange_error(status, provider));
         }
 
         #[derive(Deserialize)]
@@ -119,5 +149,52 @@ impl AuthGateway for SupabaseAuthGateway {
             ))
         })?;
         Ok(token_response.access_token)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{map_provider_exchange_error, map_user_lookup_error};
+    use crate::domain::auth::AuthDomainError;
+    use reqwest::StatusCode;
+
+    #[test]
+    fn user_lookup_maps_unauthorized_statuses() {
+        assert!(matches!(
+            map_user_lookup_error(StatusCode::UNAUTHORIZED),
+            AuthDomainError::Unauthorized(_)
+        ));
+        assert!(matches!(
+            map_user_lookup_error(StatusCode::FORBIDDEN),
+            AuthDomainError::Unauthorized(_)
+        ));
+    }
+
+    #[test]
+    fn user_lookup_maps_upstream_outages_to_external_service() {
+        assert!(matches!(
+            map_user_lookup_error(StatusCode::TOO_MANY_REQUESTS),
+            AuthDomainError::ExternalService(_)
+        ));
+        assert!(matches!(
+            map_user_lookup_error(StatusCode::BAD_GATEWAY),
+            AuthDomainError::ExternalService(_)
+        ));
+    }
+
+    #[test]
+    fn provider_exchange_maps_status_classes() {
+        assert!(matches!(
+            map_provider_exchange_error(StatusCode::BAD_REQUEST, "google"),
+            AuthDomainError::BadRequest(_)
+        ));
+        assert!(matches!(
+            map_provider_exchange_error(StatusCode::TOO_MANY_REQUESTS, "google"),
+            AuthDomainError::ExternalService(_)
+        ));
+        assert!(matches!(
+            map_provider_exchange_error(StatusCode::INTERNAL_SERVER_ERROR, "google"),
+            AuthDomainError::ExternalService(_)
+        ));
     }
 }

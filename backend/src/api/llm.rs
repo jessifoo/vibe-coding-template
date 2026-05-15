@@ -10,7 +10,7 @@ use axum::{
 };
 
 use crate::api::auth_handler::authenticated_user_from_headers;
-use crate::api::logging::truncate_for_log;
+use crate::api::logging::{LOG_PREVIEW_CHARS, truncate_for_log};
 use crate::api::state::AppState;
 use crate::models::{
     AppError, EmbeddingRequest, EmbeddingResponse, TextGenerationRequest, TextGenerationResponse,
@@ -43,7 +43,7 @@ async fn generate_text(
         user_id = %user.id,
         provider = %request.provider,
         model = %request.model,
-        prompt_preview = %truncate_for_log(&request.prompt, 50),
+        prompt_preview = %truncate_for_log(&request.prompt, LOG_PREVIEW_CHARS),
         "Text generation requested"
     );
 

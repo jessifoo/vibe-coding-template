@@ -10,7 +10,7 @@ use axum::{
 };
 
 use crate::api::auth_handler::authenticated_user_from_headers;
-use crate::api::logging::truncate_for_log;
+use crate::api::logging::{LOG_PREVIEW_CHARS, truncate_for_log};
 use crate::api::state::AppState;
 use crate::models::{
     AppError, DeleteDocumentsRequest, DocumentInput, DocumentUploadResponse, LlmProvider,
@@ -109,7 +109,7 @@ async fn search_documents(
 
     tracing::info!(
         user_id = %user.id,
-        query_preview = %truncate_for_log(&query.query_text, 50),
+        query_preview = %truncate_for_log(&query.query_text, LOG_PREVIEW_CHARS),
         limit = query.limit,
         "Searching vector database"
     );
