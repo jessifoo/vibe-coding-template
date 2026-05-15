@@ -14,10 +14,10 @@
 //! these 4xx paths).
 
 use axum::{
-    body::Body,
-    http::{header, Request, StatusCode},
-    response::Response,
     Router,
+    body::Body,
+    http::{Request, StatusCode, header},
+    response::Response,
 };
 use backend::app::build_app;
 use serde_json::Value;

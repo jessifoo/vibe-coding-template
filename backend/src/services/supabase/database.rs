@@ -6,7 +6,7 @@ use crate::config::SETTINGS;
 use crate::http_error::read_failed_response_text;
 use crate::models::AppError;
 use reqwest::Client;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 
 /// Reject table names with characters unsafe for path segments (injection, traversal).

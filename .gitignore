@@ -12,14 +12,10 @@ node_modules/
 **/node_modules/
 .pnp
 .pnp.js
-**/__pycache__/
-*.py[cod]
-*$py.class
+
+# Compiled shared libraries (language-agnostic; e.g. native modules, FFI helpers)
 *.so
-.Python
-/backend/env/
-/backend/venv/
-/backend/.venv/
+
 # Build outputs
 dist/
 build/
@@ -37,15 +33,8 @@ storybook-static/
 
 **/*.min.js
 **/*.min.css
-backend/build/
-backend/dist/
-backend/*.egg-info/
 
 # Caches and logs
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.coverage
 .DS_Store
 npm-debug.log*
 yarn-debug.log*
@@ -80,6 +69,13 @@ supabase/.temp
 *.rs.bk
 **/*.rlib
 **/*.prof*
+
+# Python (legacy local artifacts; never commit — backend is Rust)
+backend/.venv/
+backend/app/
+**/__pycache__/
+*.py[cod]
+*.pyo
 
 # IDE / local tooling
 .idea/

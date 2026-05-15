@@ -2,7 +2,7 @@
 //!
 //! Handles text generation and embedding creation.
 
-use axum::{extract::Json, http::HeaderMap, routing::post, Router};
+use axum::{Router, extract::Json, http::HeaderMap, routing::post};
 
 use crate::api::state::AppState;
 use crate::http_auth::bearer_token_from_headers;

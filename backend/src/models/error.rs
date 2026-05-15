@@ -3,9 +3,9 @@
 //! Provides consistent error handling across the API with proper HTTP status codes.
 
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

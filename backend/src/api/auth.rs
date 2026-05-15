@@ -3,10 +3,10 @@
 //! Handles user authentication and token management.
 
 use axum::{
+    Router,
     extract::Json,
     http::HeaderMap,
     routing::{get, post},
-    Router,
 };
 
 use crate::api::state::AppState;

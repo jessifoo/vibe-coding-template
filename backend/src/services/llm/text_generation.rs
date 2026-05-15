@@ -6,9 +6,9 @@
 //! remain mockable in tests and swappable at runtime.
 
 use async_openai::{
+    Client as OpenAIClient,
     config::OpenAIConfig,
     types::{ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs},
-    Client as OpenAIClient,
 };
 use async_trait::async_trait;
 use reqwest::Client;

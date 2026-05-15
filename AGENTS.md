@@ -329,10 +329,49 @@ Before marking any task complete, verify:
 
 ## Cursor Cloud specific instructions
 
-The default VM `rustc` may lag behind this repo; the backend pins **stable**
-via `backend/rust-toolchain.toml`, so run `cargo` from `backend/` after
-`rustup` installs that toolchain. This matches `edition = "2024"` and
-`rust-version` in `backend/Cargo.toml`.
+The default VM `rustc` may lag behind this repo. The backend pins **stable**
+via `backend/rust-toolchain.toml` (run `cargo` from `backend/` after `rustup`
+installs that toolchain). This matches `edition = "2024"` and `rust-version`
+in `backend/Cargo.toml`.
+
+The cloud agent VM also typically includes:
+
+- **Node.js 22** + `npm` symlinked into `/usr/local/bin` for the `root` user.
+- **`cargo-watch`** pre-installed for `make dev` / `cargo watch -x run`.
+- System libs needed for the build: `build-essential` and `pkg-config`. The
+  backend uses `reqwest` with `default-features = false` + `rustls-tls`, so
+  neither `libssl-dev` nor `libssl3` is required — `ldd target/debug/backend`
+  on the cloud VM links only `libgcc_s`, `libm`, `libc`, and `ld-linux`. If
+  you ever switch `reqwest`/`qdrant-client` to a native-tls backend, you will
+  need to add `libssl-dev` (build) and `libssl3` (runtime).
+
+### Provisioning a fresh Linux host (agents / CI)
+
+Minimal Debian/Ubuntu packages for **native** (non-Docker) builds:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  build-essential pkg-config curl git ca-certificates \
+  nodejs npm
+```
+
+- **Node.js**: install **20.9+** (see `frontend/package.json` `engines`). The
+  distro `nodejs` package may be too old; use [nodejs.org](https://nodejs.org/)
+  LTS installers, [NodeSource](https://github.com/nodesource/distributions), or
+  [nvm](https://github.com/nvm-sh/nvm) if needed. You must have both **`node`**
+  and **`npm`** on `PATH`.
+- **Rust**: install [rustup](https://rustup.rs/), then from the repo run
+  `cd backend && rustup show` so `backend/rust-toolchain.toml` installs the
+  pinned **stable** toolchain; `rustup component add rustfmt clippy` is
+  applied automatically by `./scripts/verify-agent-toolchain.sh`.
+
+After installing tools, run a full non-interactive gate from the repo root:
+
+```bash
+./scripts/verify-agent-toolchain.sh
+# or: make agent-verify
+```
 
 ### Running services natively (without Docker)
 
@@ -343,26 +382,38 @@ SUPABASE_URL=https://placeholder.supabase.co \
 SUPABASE_SERVICE_KEY=placeholder \
 cargo run
 ```
-Requires `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` (or a `.env` discoverable
-from the process working directory).
+Or after a build, run the binary directly:
+```bash
+cd /workspace/backend && cargo build
+SUPABASE_URL=... SUPABASE_SERVICE_KEY=... ./target/debug/backend
+```
+The backend reads env vars at startup via `dotenvy::dotenv()` (see
+`backend/src/config/mod.rs`). It will load `/workspace/.env` automatically if
+present when the working directory allows it. `SUPABASE_URL` and
+`SUPABASE_SERVICE_KEY` are required; the process will panic on startup without
+them. Health check is `GET /` and returns
+`{"environment": "...", "status": "online", "version": "..."}`.
 
 **Frontend** (port 3000):
 ```bash
 cd /workspace/frontend
-npm ci
+npm ci    # first time only; package-lock.json is committed
 npm run dev
 ```
 Needs `frontend/.env.local` with `NEXT_PUBLIC_SUPABASE_URL`,
-`NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL`.
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_API_URL`
+(usually `http://localhost:8000`).
 
 ### Lint / format / test commands
 
 Backend (Rust):
 ```bash
 cd /workspace/backend
-cargo fmt -- --check
+cargo check                       # quick type-check
 cargo clippy --all-targets -- -D warnings
-cargo test
+cargo fmt -- --check              # CI-style format check
+cargo fmt                         # apply formatting
+cargo test                        # run unit + integration tests
 ```
 
 Frontend (TypeScript):
@@ -374,8 +425,23 @@ npm run build
 
 ### Key gotchas
 
+- The repo uses a workspace-less single-crate Cargo project at `backend/`.
+  Run all `cargo` commands from `/workspace/backend`. The `target/` directory
+  is gitignored.
+- The first `cargo check` / `cargo build` on a fresh VM downloads many crates
+  and takes a few minutes; subsequent builds are incremental.
 - The root `.env` is picked up when present; if you run only from `backend/`,
   set env vars explicitly or place `.env` accordingly.
-- Supabase clients are created lazily in places; the process may start with
-  placeholders until requests hit Supabase.
-- Qdrant gracefully falls back to in-memory mode when `QDRANT_URL` is empty.
+- `qdrant-client` is declared as `1` in `backend/Cargo.toml` (semver-compatible
+  releases). Do not bump without checking MSRV notes on the crate and this repo.
+- Supabase service clients are constructed lazily on first request, so the
+  backend may boot with placeholder Supabase credentials; only requests that
+  hit Supabase will fail until keys are valid.
+- Qdrant gracefully falls back to in-memory mode when `QDRANT_URL` is empty
+  (see `backend/src/services/vectordb/qdrant.rs`).
+- The frontend `npm run build` can warn `getaddrinfo ENOTFOUND backend` while
+  prerendering `/api/health` — that route tries to reach the Docker hostname
+  `backend`. The build still succeeds and this is expected when running
+  natively without Docker.
+- Old Python artifacts (`backend/.venv/`, `backend/app/`, `requirements.txt`)
+  no longer exist on this branch — the backend is Rust/Axum.

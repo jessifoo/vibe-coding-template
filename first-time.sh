@@ -103,13 +103,41 @@ else
   print_message "Node.js is installed (${node_version})."
 fi
 
-# Check for Python
-if ! command -v python3 &> /dev/null; then
-  print_warning "Python 3 not found. Backend development might be limited."
-  print_message "Please install Python 3 from https://www.python.org/downloads/"
+# Check for npm (ships with Node; required for npm ci / lint / build)
+if ! command -v npm &> /dev/null; then
+  print_warning "npm not found. Install a Node.js distribution that includes npm."
 else
-  python_version=$(python3 --version)
-  print_message "Python is installed (${python_version})."
+  npm_version=$(npm -v)
+  print_message "npm is installed (${npm_version})."
+fi
+
+# Check for Make (the documented `make dev` workflow needs it)
+if ! command -v make &> /dev/null; then
+  print_warning "Make not found. The 'make dev' / 'make prod' workflow won't work."
+  print_message "Install GNU Make:"
+  echo -e "  ${GREEN}sudo apt-get install build-essential${NC}  (Debian/Ubuntu)"
+  echo -e "  ${GREEN}sudo dnf install make${NC}                 (Fedora/RHEL)"
+  echo -e "  ${GREEN}xcode-select --install${NC}                (macOS)"
+else
+  make_version=$(make --version | head -n 1)
+  print_message "Make is installed (${make_version})."
+fi
+
+# Check for Rust toolchain (cargo and rustc are separate binaries; both are required)
+missing_rust_tools=()
+if ! command -v cargo &> /dev/null; then
+  missing_rust_tools+=("cargo")
+fi
+if ! command -v rustc &> /dev/null; then
+  missing_rust_tools+=("rustc")
+fi
+if [ ${#missing_rust_tools[@]} -gt 0 ]; then
+  print_warning "Rust toolchain incomplete (missing: ${missing_rust_tools[*]}). Backend development might be limited."
+  print_message "Please install Rust from https://rustup.rs/ (rustup installs both cargo and rustc)."
+else
+  cargo_version=$(cargo --version)
+  rustc_version=$(rustc --version)
+  print_message "Rust is installed (${rustc_version}, ${cargo_version})."
 fi
 
 # Set up Supabase
@@ -228,6 +256,9 @@ echo "This will start both the frontend and backend services."
 echo
 echo "For more commands, run:"
 echo -e "${GREEN}make help${NC}"
+echo
+print_message "Cloud agents / CI: after installing Node 20+ and Rust (rustup), run:"
+echo -e "  ${GREEN}./scripts/verify-agent-toolchain.sh${NC}   or   ${GREEN}make agent-verify${NC}"
 echo
 echo "Happy coding!"
 

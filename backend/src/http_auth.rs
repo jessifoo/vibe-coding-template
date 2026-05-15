@@ -3,7 +3,7 @@
 //! Single implementation of Bearer token parsing from request headers, shared
 //! by API layer and the Supabase auth service.
 
-use axum::http::{header, HeaderMap};
+use axum::http::{HeaderMap, header};
 
 use crate::models::AppError;
 

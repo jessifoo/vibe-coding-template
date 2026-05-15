@@ -72,12 +72,18 @@ impl LlmUsage {
 pub struct TextGenerationRequest {
     /// The prompt to generate text from
     #[validate(length(min = 1, message = "Prompt cannot be empty"))]
-    #[validate(custom(function = "validate_non_blank", message = "Prompt cannot be whitespace only"))]
+    #[validate(custom(
+        function = "validate_non_blank",
+        message = "Prompt cannot be whitespace only"
+    ))]
     pub prompt: String,
 
     /// Model to use for generation
     #[serde(default = "default_text_model")]
-    #[validate(custom(function = "validate_non_blank", message = "Model cannot be whitespace only"))]
+    #[validate(custom(
+        function = "validate_non_blank",
+        message = "Model cannot be whitespace only"
+    ))]
     pub model: String,
 
     /// Maximum tokens to generate
@@ -129,12 +135,18 @@ pub struct TextGenerationResponse {
 pub struct EmbeddingRequest {
     /// Text to create embedding for
     #[validate(length(min = 1, message = "Text cannot be empty"))]
-    #[validate(custom(function = "validate_non_blank", message = "Text cannot be whitespace only"))]
+    #[validate(custom(
+        function = "validate_non_blank",
+        message = "Text cannot be whitespace only"
+    ))]
     pub text: String,
 
     /// Model to use for embedding
     #[serde(default = "default_embedding_model")]
-    #[validate(custom(function = "validate_non_blank", message = "Model cannot be whitespace only"))]
+    #[validate(custom(
+        function = "validate_non_blank",
+        message = "Model cannot be whitespace only"
+    ))]
     pub model: String,
 
     /// Provider to use

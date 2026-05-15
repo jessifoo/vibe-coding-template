@@ -10,10 +10,10 @@
 //! - `SUPABASE_SERVICE_KEY`
 
 use axum::{
+    Router,
     body::Body,
     http::{Request, StatusCode},
     response::Response,
-    Router,
 };
 use backend::app::build_app;
 use serde_json::Value;
