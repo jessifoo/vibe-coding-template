@@ -28,8 +28,8 @@ impl AppState {
     ///
     /// # Errors
     ///
-    /// Returns [`AppRunError::QdrantInit`] if the Qdrant client cannot be
-    /// created.
+    /// Returns [`AppRunError::QdrantInit`] if Qdrant initialization fails and
+    /// [`AppRunError::HttpClientInit`] if HTTP client initialization fails.
     pub async fn try_new() -> Result<Self, AppRunError> {
         let qdrant = QdrantService::new()
             .await
@@ -39,7 +39,7 @@ impl AppState {
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| {
-                AppRunError::QdrantInit(crate::models::AppError::Configuration(format!(
+                AppRunError::HttpClientInit(crate::models::AppError::Configuration(format!(
                     "Failed to create HTTP client: {e}"
                 )))
             })?;

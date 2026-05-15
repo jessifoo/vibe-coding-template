@@ -57,6 +57,9 @@ pub enum AppRunError {
     #[error("Failed to initialize Qdrant: {0}")]
     QdrantInit(AppError),
 
+    #[error("Failed to initialize HTTP client: {0}")]
+    HttpClientInit(AppError),
+
     #[error("Server bind or accept error: {0}")]
     Io(#[from] std::io::Error),
 }
