@@ -5,6 +5,8 @@
 
 use std::sync::Arc;
 
+use crate::application::auth::AuthUseCase;
+use crate::infrastructure::supabase::auth_gateway::SupabaseAuthGateway;
 use crate::models::AppRunError;
 use crate::services::vectordb::qdrant::QdrantService;
 
@@ -16,6 +18,9 @@ pub struct AppState {
 
     /// Shared HTTP client for making external requests.
     pub reqwest_client: Arc<reqwest::Client>,
+
+    /// Shared auth use-case (single auth entrypoint for protected APIs).
+    pub auth_use_case: Arc<AuthUseCase>,
 }
 
 impl AppState {
@@ -23,8 +28,8 @@ impl AppState {
     ///
     /// # Errors
     ///
-    /// Returns [`AppRunError::QdrantInit`] if the Qdrant client cannot be
-    /// created.
+    /// Returns [`AppRunError::QdrantInit`] if Qdrant initialization fails and
+    /// [`AppRunError::HttpClientInit`] if HTTP client initialization fails.
     pub async fn try_new() -> Result<Self, AppRunError> {
         let qdrant = QdrantService::new()
             .await
@@ -34,14 +39,19 @@ impl AppState {
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| {
-                AppRunError::QdrantInit(crate::models::AppError::Configuration(format!(
+                AppRunError::HttpClientInit(crate::models::AppError::Configuration(format!(
                     "Failed to create HTTP client: {e}"
                 )))
             })?;
 
+        let reqwest_client = Arc::new(reqwest_client);
+        let auth_gateway = SupabaseAuthGateway::new(Arc::clone(&reqwest_client));
+        let auth_use_case = Arc::new(AuthUseCase::new(Arc::new(auth_gateway)));
+
         Ok(Self {
             qdrant: Arc::new(qdrant),
-            reqwest_client: Arc::new(reqwest_client),
+            reqwest_client,
+            auth_use_case,
         })
     }
 }
