@@ -1,5 +1,8 @@
 # Code Review — Reporting to Uncle Bob
 
+> **Status update (later than the original audit):** the analysis below still stands and remains the evidence base. The *action* plan at the bottom of this document ("Optimization Plan") has been **superseded by [`ARCHITECTURE_PLAN.md`](./ARCHITECTURE_PLAN.md)**, which targets lead-developer-quality Clean Architecture expressed as microservices and **preserves every feature** (including the currently-unused Supabase database/storage code, which becomes the engine of a new `documents-service`). Read the analysis here for the *why*; read `ARCHITECTURE_PLAN.md` for the *what we are actually going to do*.
+
+
 > Audit of the **Full Stack Vibe Coding Template** (Next.js frontend + Rust Axum backend + Supabase + Qdrant), evaluated through the lens of *Clean Code*, *Clean Architecture*, and the **SOLID** principles.
 >
 > Audit scope: working tree at `main` (`942d8ed`), `backend/src/**` (4,155 LOC of Rust), `frontend/**` (1,071 LOC of TS/TSX), `supabase/migrations/`.

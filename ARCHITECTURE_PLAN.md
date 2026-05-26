@@ -1,0 +1,364 @@
+# Architecture Plan — Clean Architecture, Deployed as Microservices
+
+> Successor to the *Optimization Plan* in `CODE_REVIEW.md`. The analysis there still stands; this document replaces the action plan.
+>
+> **Goal:** Lead-developer-quality Clean Architecture across the codebase. Every feature in the template stays; bounded contexts are made explicit; each context is deployed as its own service.
+>
+> **Non-goal:** Reducing the line count. Deletion happens only when it serves cleanliness (duplicate models, redundant parsers). Anything that represents real domain capability — including code that is currently unused — gets a proper home, not the trash can.
+
+---
+
+## 1. Framing (the part Bob actually cares about)
+
+> "The architecture of a system is independent of the framework or the deployment mechanism. Microservices are a deployment option, not an architecture." — *Robert C. Martin*
+
+The architectural boundary that matters is the **use case + the port**. Microservices are how we *express* that boundary at runtime. If we get the boundaries right inside the codebase, splitting them across processes is a configuration change. If we get them wrong, no number of containers will save us.
+
+So the plan does two things, in order:
+
+1. **Finish drawing the boundaries** — every external dependency lives behind a domain port; every use case lives in `application/`; every wire format lives in `infrastructure/<vendor>/`. This work is independent of the process split and pays off immediately even if we stopped here.
+2. **Express each boundary as a deployable service** — one Cargo workspace, one binary crate per bounded context, typed HTTP clients between them, a thin API gateway in front. This is what we ship.
+
+The previous audit's "delete the dead `services/supabase/*`" framing is replaced with "promote it to a real bounded context (`documents-service`) where its capabilities become productive." `SupabaseDatabaseService` and `SupabaseStorageService` are not dead; they're early. They become the engine of the documents service.
+
+---
+
+## 2. Bounded Contexts
+
+Six contexts, derived from the existing feature set with no capability removed:
+
+| # | Context | Owns | Upstream(s) | Today lives in |
+|---|---------|------|-------------|----------------|
+| 1 | **Identity** | JWT verification, user profile, OAuth provider exchange | Supabase Auth | `domain/auth.rs`, `application/auth.rs`, `infrastructure/supabase/auth_gateway.rs` |
+| 2 | **LLM** | Text generation across providers | OpenAI, Anthropic | `services/llm/text_generation.rs` |
+| 3 | **Embeddings** | Vector embedding across providers | OpenAI (and future Cohere/Voyage) | `services/llm/embedding.rs` |
+| 4 | **Knowledge** | Document indexing + semantic search, owner-scoped | Qdrant, Embeddings (internal) | `services/vectordb/qdrant.rs` |
+| 5 | **Documents** | File upload, metadata persistence, content workflows | Supabase Storage, Supabase DB, Knowledge (internal) | `services/supabase/database.rs`, `services/supabase/storage.rs` (currently unused) |
+| 6 | **API Gateway** | Ingress, CORS, JWT verification, internal-token issuance, fan-out routing | All of the above | `app.rs`, `api/*` |
+
+Each becomes a deployable service of the same name. The frontend continues to talk to **one** address — the gateway — and never knows the topology behind it.
+
+### 2.1 Runtime topology
+
+```
+                          ┌───────────────────────────┐
+                          │      frontend (Next 15)   │
+                          └──────────────┬────────────┘
+                                         │  HTTPS, Supabase JWT
+                                         ▼
+                          ┌───────────────────────────┐
+                          │       api-gateway         │
+                          │  - verifies JWT           │
+                          │  - issues internal token  │
+                          │  - request-id, tracing    │
+                          └───┬────┬────┬────┬────────┘
+                              │    │    │    │  HTTP/JSON + signed internal token
+              ┌───────────────┘    │    │    └────────────────┐
+              ▼                    ▼    ▼                     ▼
+   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+   │ identity-service │  │   llm-service    │  │embedding-service │  │knowledge-service │
+   │   → Supabase     │  │ → OpenAI/Anthr.  │  │   → OpenAI       │  │   → Qdrant       │
+   └──────────────────┘  └──────────────────┘  └────────▲─────────┘  └────────▲─────────┘
+                                                        │                     │
+                                                        └──────────┬──────────┘
+                                                                   │
+                                                       ┌───────────┴───────────┐
+                                                       │   documents-service   │
+                                                       │ → Supabase Storage    │
+                                                       │ → Supabase Database   │
+                                                       └───────────────────────┘
+```
+
+Service-to-service edges only flow downward and rightward (no cycles). Identity is leaf. Embeddings is leaf. LLM is leaf. Knowledge depends on Embeddings. Documents depends on Knowledge and Embeddings (indirectly). The gateway depends on everyone but is depended on by no one.
+
+### 2.2 Per-service layering — the same cake, six times
+
+Every service uses the identical four-layer shape:
+
+```
+services/<name>-service/
+├── Cargo.toml                  # binary crate
+└── src/
+    ├── main.rs                 # ~15 lines: load config, call service-runtime::run(...)
+    ├── api/                    # Axum router, handlers, request/response DTOs
+    │   ├── mod.rs
+    │   └── <feature>.rs
+    ├── application/            # use-cases — orchestration, transport-agnostic
+    │   ├── mod.rs
+    │   └── <feature>_use_case.rs
+    ├── domain/                 # entities, value objects, ports (traits), domain errors
+    │   ├── mod.rs
+    │   ├── entities.rs
+    │   └── ports.rs
+    └── infrastructure/         # port implementations: external adapters
+        ├── mod.rs
+        └── <vendor>/
+            ├── mod.rs
+            ├── adapter.rs
+            └── wire.rs         # vendor-specific (de)serialization types
+```
+
+Rules (enforced by clippy `disallowed_methods` + module visibility):
+
+- `domain` depends on **nothing** except `std` and `domain-core` (shared crate).
+- `application` depends only on `domain`.
+- `infrastructure` depends on `domain` (to implement ports) and external SDKs.
+- `api` depends on `application`, plus `service-runtime` (HTTP boilerplate) and `contracts` (DTO definitions shared with consumers).
+- No layer ever imports `Axum`, `reqwest`, `qdrant-client`, `async-openai` outside `infrastructure/` and `api/`.
+
+This is *exactly* the structure PR #36 introduced for auth. We are repeating it deliberately and uniformly.
+
+---
+
+## 3. Cargo Workspace Layout
+
+```
+backend/
+├── Cargo.toml                  # [workspace], shared profiles, shared deps
+├── rust-toolchain.toml         # unchanged
+├── crates/
+│   ├── contracts/              # request/response DTOs shared by services and clients
+│   ├── domain-core/            # cross-context primitives: AuthenticatedUser, RequestId, AppError
+│   ├── service-runtime/        # Axum bootstrap, tracing, request-id, health endpoints, AppRunError
+│   ├── internal-auth/          # signed internal token format (issuer + verifier)
+│   └── clients/                # typed HTTP clients (one module per downstream service)
+└── services/
+    ├── api-gateway/
+    ├── identity-service/
+    ├── llm-service/
+    ├── embedding-service/
+    ├── knowledge-service/
+    └── documents-service/
+```
+
+### 3.1 Shared crate responsibilities
+
+- **`contracts`** — all `serde`-derived request/response types exchanged between services or returned to the frontend. Versioned (`v1` module per service). Stays small; no logic.
+- **`domain-core`** — `AuthenticatedUser`, `UserId`, `RequestId`, `AppError`, `AppRunError`, the bearer-token parser (today's `http_auth.rs`), the error-response shape with a `request_id` field. Pure data + free functions. Zero framework imports.
+- **`service-runtime`** — `pub fn run(router: Router, cfg: ServiceConfig) -> Result<(), AppRunError>`. Handles bind, tracing init, request-id middleware, CORS (per-service config), trace-propagation middleware (W3C `traceparent`), `GET /healthz` (liveness) and `GET /readyz` (readiness — checks port-bound + upstream-reachable). All six services call this; no service writes Axum bootstrap by hand.
+- **`internal-auth`** — issuer (used by gateway): produces `Authorization: Internal <token>` where `<token>` is a JWS-signed JSON payload `{ user_id, roles, request_id, exp, iss }` with HS256 against `INTERNAL_AUTH_HMAC_SECRET`. Verifier (used by downstream services): an Axum extractor that yields the inner principal or rejects with 401.
+- **`clients`** — typed clients (`IdentityClient`, `LlmClient`, `EmbeddingClient`, `KnowledgeClient`, `DocumentsClient`). Each owns its own `reqwest::Client`, propagates `traceparent`, attaches the internal-auth token. Returns `Result<T, ClientError>` where `T` is from `contracts`.
+
+This split is what lets every service stay ~300–800 LOC of *its own* concerns, with the boilerplate factored out.
+
+---
+
+## 4. Inter-service Contracts
+
+### 4.1 Transport
+
+**HTTP/JSON over the cluster network.** Justification:
+
+- Same skill set as the external API; no new tooling.
+- Plays well with the existing tracing/request-id middleware.
+- Easy to debug with `curl`.
+- gRPC/tonic is a viable upgrade later; it's contained inside `clients/` and `api/` so the swap stays local.
+
+### 4.2 Versioning
+
+- Each service exposes `/v1/...`.
+- DTOs live in `crates/contracts/src/<service>/v1/`.
+- Breaking changes ship a new module (`v2/`) alongside v1; deprecation window enforced via a tracing warning emitted by the old handler.
+
+### 4.3 Frontend boundary
+
+Frontend continues to call only the gateway. The frontend's `lib/api-types.ts` Zod schemas are kept in lockstep with `contracts/` via a small `make sync-contracts` step (initially manual; later a `ts-rs` or `schemars` + `openapi-typescript` pipeline).
+
+---
+
+## 5. Inter-service Authentication & Authorization
+
+Two tiers:
+
+### 5.1 External (frontend ↔ gateway)
+
+Supabase JWT in the `Authorization: Bearer <token>` header. Gateway verifies it. Two options for verification, both supported:
+
+- **Option A (default for the template):** call `GET {SUPABASE_URL}/auth/v1/user` with the bearer — current behavior. Simple, no key management.
+- **Option B (production-recommended):** verify the JWT locally using `SUPABASE_JWT_SECRET` (already plumbed in `SupabaseConfig` — finally a use for it). Eliminates a network hop per request.
+
+Both paths funnel into the same `AuthenticatedUser` value. The choice is a `IdentityConfig::Mode` enum so deployments pick.
+
+### 5.2 Internal (gateway ↔ downstream services)
+
+Once the gateway has resolved `AuthenticatedUser`, it issues a short-lived (60 s) HS256-signed JWS in a custom header (`X-Internal-Auth`). Downstream services use `internal-auth::Verifier` as an Axum extractor; it produces an `InternalPrincipal { user_id, roles, request_id }`. No bearer token ever crosses the internal boundary.
+
+Why HMAC instead of mTLS for the template:
+
+- Zero infrastructure (no per-service certs, no CA).
+- A single rotation point: change the env var, restart services.
+- mTLS can be layered on top later by the cluster (Istio, Linkerd, or a sidecar) without code changes.
+
+Authorization decisions (roles, ownership) stay in the downstream service that owns the data — e.g., the `_owner_user_id` filter in `knowledge-service` continues to enforce per-user isolation, but now it reads `user_id` from `InternalPrincipal` instead of from a bearer token.
+
+---
+
+## 6. Observability
+
+- **Tracing.** Every service inits `tracing` via `service-runtime`. The existing `tower-http::request-id` middleware is augmented with a W3C `traceparent` propagator: incoming `traceparent` becomes the parent span; outgoing client requests (via `clients/`) attach the current span's `traceparent`. End-to-end traces work without an OTel collector but slot directly into one when deployed.
+- **Logging.** All logs JSON in production (already supported by `tracing-subscriber`'s `json` feature). Every log line carries `request_id`, `service`, and (when present) `user_id`.
+- **Metrics.** Phase 8: add `metrics` + `metrics-exporter-prometheus` and a `/metrics` endpoint per service through `service-runtime`. Counters for request rate, latency histogram, error rate by status class, and per-downstream client metrics.
+- **Health.** `/healthz` (process up) and `/readyz` (port bound + upstream pingable) on every service. Distinct endpoints so a slow Supabase doesn't take the pod out of the cluster.
+
+---
+
+## 7. Configuration
+
+- One `.env.example` at the repo root, **sectioned by service**, lists every variable.
+- Per-service config struct lives in that service's `src/config.rs`, parsed via `service-runtime::config::load::<MyConfig>()`. The shared `service-runtime` crate handles common knobs (port, log level, CORS origins, internal-auth secret).
+- Production: each service gets only the variables it needs. The gateway has Supabase URLs but not OpenAI keys; `llm-service` has OpenAI/Anthropic keys but not Qdrant URL; etc. Principle of least privilege at the env-var level.
+- Local dev: a single root `.env` shared across services, loaded by docker-compose into each container.
+
+This is also where the magic timeouts called out in `CODE_REVIEW.md` §2.9 land — per-service, with sane defaults overridable by env.
+
+---
+
+## 8. Local Development
+
+- **`docker-compose.yml`** at root grows from 1 backend container to 6 (one per service) + Qdrant. Each service exposed on `127.0.0.1:80XX` for direct curling during dev.
+- **`make dev`** orchestrates everything. A new **`make dev-monolith`** target keeps the option of running the whole topology in one process (compiles all six services into a single binary with all routers mounted) for fast inner loops on a laptop. The two modes share the same `service-runtime` runner.
+- **Frontend** unchanged: it talks to the gateway at `http://localhost:8000` (or whatever `NEXT_PUBLIC_API_URL` says), exactly as today.
+- **Hot reload:** `cargo-watch` per service (or scoped via `cargo watch -w services/llm-service`).
+
+---
+
+## 9. Testing Strategy
+
+Every layer keeps its own test surface; cross-cutting tests live at the top.
+
+| Layer | Test type | Where it lives |
+|---|---|---|
+| `domain/` | Pure unit tests, no I/O | In-module `#[cfg(test)]` |
+| `application/` | Use-case tests with mocked ports | In-module `#[cfg(test)]`; mocks under `application/tests/mocks.rs` |
+| `infrastructure/` | Adapter unit tests (status-code mapping, parsing). For HTTP adapters, a `mockito` or `wiremock` server | `infrastructure/<vendor>/tests/` |
+| `api/` | Router-level tests using `tower::ServiceExt::oneshot` with mock use-cases | `services/<svc>-service/tests/api_*.rs` |
+| Inter-service | **Contract tests** — each consumer pins a JSON fixture of the upstream's response; both consumer and provider tests reference the same fixture | `crates/contracts/tests/contracts_<svc>.rs` |
+| End-to-end | Real services in docker-compose, gateway hit from the test harness | Top-level `e2e/` crate or Playwright in `frontend/` |
+
+The "happy-path test gap" called out in `CODE_REVIEW.md` §2.7 is fixed by **construction** in this architecture: every service has its own integration test crate that builds the service router with mocked ports and exercises the public routes. No external services needed in CI.
+
+---
+
+## 10. Migration Plan — Phased, Always-Deployable
+
+Eight phases. `main` deploys after every phase. Each phase is atomic relative to the next.
+
+> **Convention:** each phase below lists `Goal`, `Deliverable`, `Touches`, `Preserves`, and `Done when`.
+
+### Phase 0 — Workspace + shared crates
+
+- **Goal:** Set the stage. No service split yet.
+- **Deliverable:** Convert `backend/` to a Cargo workspace; introduce `crates/contracts/`, `crates/domain-core/`, `crates/service-runtime/`, `crates/internal-auth/`, `crates/clients/`. The existing monolith moves to `services/api-gateway/` (renamed but still containing all logic).
+- **Touches:** `backend/Cargo.toml` → workspace root; all of `backend/src/` migrates to `backend/services/api-gateway/src/`; `domain-core` absorbs `http_auth.rs`, `models/error.rs`, `domain/auth.rs`'s `AuthenticatedUser`; `service-runtime` absorbs the `app.rs` bootstrap.
+- **Preserves:** Every external HTTP route, every behavior, every test passes unchanged. Binary name changes (`backend` → `api-gateway`); `Dockerfile`, `Makefile`, and `docker-compose.yml` updated accordingly.
+- **Done when:** `cargo build --workspace`, `cargo test --workspace`, and the existing `tests/api_errors.rs` (now under `services/api-gateway/tests/`) all pass; `curl localhost:8000/` returns the same JSON as before.
+
+### Phase 1 — Finish ports-and-adapters inside the monolith
+
+- **Goal:** Every external dependency sits behind a domain port. No code crosses a layer it shouldn't.
+- **Deliverable:**
+  - `domain::llm::TextGenerationGateway` port; `infrastructure::openai::TextGenerationAdapter` + `infrastructure::anthropic::TextGenerationAdapter`; vendor wire types moved to `infrastructure/<vendor>/wire.rs`.
+  - `domain::embedding::EmbeddingGateway` port; `infrastructure::openai::EmbeddingAdapter`.
+  - `domain::knowledge::VectorIndex` port; `infrastructure::qdrant::VectorIndexAdapter` (today's `qdrant.rs`).
+  - `domain::documents::{DocumentRepository, FileStore}` ports; `infrastructure::supabase::{DatabaseAdapter, StorageAdapter}` (the currently-unused database/storage code becomes the home for these).
+  - Delete duplicates that now have one canonical home: the `SupabaseUser`/`UserMetadata` clones in `models/auth.rs` (the gateway has `SupabaseUserRecord` already), the duplicate bearer-token parser in `services/supabase/auth.rs` (the canonical lives in `domain-core` after Phase 0), and the per-request HTTP client constructions called out in `CODE_REVIEW.md` §1.3.
+  - Application-layer use cases for every feature: `GenerateText`, `CreateEmbedding`, `IndexDocument`, `SearchDocuments`, `UploadDocument`, `ListDocuments`.
+  - `AppState` becomes a struct of `Arc<dyn ...Gateway>` ports, composed in a new `composition.rs`.
+- **Touches:** Most of `services/api-gateway/src/`. Roughly 30 files.
+- **Preserves:** Public API routes, JSON shapes, behavior, tests.
+- **Done when:** No `reqwest::Client::builder()` anywhere except `composition.rs`; no Axum import in `domain/` or `application/`; clippy clean; all routes still return the same JSON.
+
+> At the end of Phase 1 we have a *Clean Architecture monolith*. If we stopped here we'd still have shipped a meaningful upgrade. We don't stop here.
+
+### Phase 2 — Extract `identity-service`
+
+- **Goal:** First bounded context lives in its own process.
+- **Deliverable:**
+  - `services/identity-service/` binary. Copies the auth domain/application/infrastructure layers from the gateway. Exposes `POST /v1/sessions/from-bearer` (verify a Supabase JWT → return profile) and `POST /v1/sessions/from-provider-token` (exchange OAuth → return session).
+  - `crates/clients/src/identity.rs` — typed `IdentityClient` with `verify_bearer(...)` and `exchange_provider_token(...)`.
+  - Gateway's `api/auth.rs` swaps from in-process `AuthUseCase` to `IdentityClient`. The gateway's middleware that resolves the authenticated user (today: `authenticated_user_from_headers`) now calls `IdentityClient::verify_bearer` and caches the result for the request lifetime.
+  - docker-compose: add `identity-service` on `:8001`.
+- **Preserves:** Frontend behavior is identical (`/api/auth/me`, `/api/auth/provider-token` still work).
+- **Done when:** Gateway has no `domain::auth` module of its own; integration test verifies `/api/auth/me` end-to-end through both processes; bringing identity-service down causes a graceful 503 with `request_id`.
+
+### Phase 3 — Extract `llm-service`
+
+- Same pattern as Phase 2. New service on `:8002`. New `LlmClient` in `crates/clients/`. Gateway's `api/llm.rs::generate_text` becomes a 10-line proxy + DTO mapping.
+- New service hosts the OpenAI/Anthropic adapters, the request validation, the per-provider model catalog, and (Phase 8) per-user rate limiting and cost accounting.
+
+### Phase 4 — Extract `embedding-service`
+
+- Same pattern. `:8003`. New `EmbeddingClient`. Knowledge service (still inside the gateway at this point) starts calling embedding-service over HTTP instead of in-process.
+
+### Phase 5 — Extract `knowledge-service`
+
+- Same pattern. `:8004`. New `KnowledgeClient`. Owns Qdrant. Calls `embedding-service` internally for both ingestion and search. The owner-scoping logic (`_owner_user_id` filter, the audit's §2.7 unit tests) moves with it.
+- The internal-auth principal (`user_id`) now carries through from gateway → knowledge-service, so the owner filter has a clean, single source of truth.
+
+### Phase 6 — Extract `documents-service`
+
+- `:8005`. Owns Supabase database (document metadata) and Supabase storage (file blobs). Exposes `POST /v1/documents` (upload + index), `GET /v1/documents`, `GET /v1/documents/:id`, `DELETE /v1/documents/:id`.
+- On upload: documents-service writes the blob to Supabase Storage, writes metadata to Supabase DB, then calls `knowledge-service` to embed + index, then returns the document with both its storage URL and its knowledge-base ID.
+- This is the moment the dead code from the old audit becomes *the load-bearing capability of an entire service*. The `services/supabase/{database,storage}.rs` files are not deleted; they are promoted into `services/documents-service/src/infrastructure/supabase/`.
+- Frontend gets a new `/api/documents` namespace exposed by the gateway.
+
+### Phase 7 — Promote the gateway
+
+- `api-gateway` becomes pure plumbing: routing tables, JWT pre-verification, internal-token issuance, response shaping, CORS, request-id, OpenAPI publishing. Zero business logic.
+- The gateway's `Cargo.toml` drops `qdrant-client`, `async-openai`, and Supabase-specific deps; it depends only on `crates/contracts`, `crates/clients`, and `service-runtime`. The dependency graph now reflects the architectural diagram.
+
+### Phase 8 — Hardening
+
+- **Internal auth on:** every downstream service requires `X-Internal-Auth`; gateway issues it; rotation runbook in `docs/`.
+- **W3C `traceparent` propagation** end-to-end; one screenshot of an end-to-end trace in the README.
+- **Metrics + Prometheus** endpoint on every service.
+- **Contract tests** pinned for every cross-service edge.
+- **Per-user rate limits** in `llm-service` and `embedding-service` (configurable, default to generous).
+- **Sanitized 5xx responses** (the audit's §2.2): generic body + `request_id`; full detail only in logs. Implemented once in `service-runtime`, picked up by every service.
+- **A11y + UX fixes** from the audit's §3 — those are still valid and land here.
+
+---
+
+## 11. Non-goals (explicit)
+
+To keep the scope honest:
+
+- **No message broker.** All flows are request/response. If async eventing is needed later (e.g., async indexing of uploaded documents), it's a clean addition — add a `crates/events/` module + Postgres-LISTEN-based queue or NATS. Not now.
+- **No service mesh.** mTLS, retries, and rate limiting are the cluster's job in production. The template ships with HMAC-signed internal tokens and per-client retry policies in `clients/` — enough for dev and small prod.
+- **No shared database.** Every service that needs persistence owns its own schema (documents-service owns the `documents` and `document_files` tables; knowledge-service owns Qdrant; identity-service owns nothing locally — Supabase Auth is its store). Migrations stay per-service.
+- **No "distributed monolith."** Services communicate **only** through their published clients; no service reads another's tables. The gateway is the only fan-out point.
+- **No gRPC in Phase 1.** Considered and deferred. The `clients/` abstraction is built so the swap stays local.
+
+---
+
+## 12. Open Questions (defaults chosen; flag if you want different)
+
+| Question | Default chosen | Why | Override looks like |
+|---|---|---|---|
+| Mono-repo or multi-repo? | **Mono-repo, Cargo workspace.** | Atomic refactors, one CI, one set of shared crates. | Split `crates/` into a separate repo + git submodule when team scales past ~10. |
+| Inter-service transport? | **HTTP/JSON.** | Same skill set as the public API; debuggable; cheap. | Swap `clients/` to `tonic` + add `.proto` files; api layer unchanged. |
+| Internal auth? | **HMAC-signed JWS (HS256).** | Zero key infra; one env var. | Add mTLS via service mesh; remove HMAC code. |
+| JWT verification at the gateway? | **Default Option A (HTTP to Supabase) for templates; Option B (local with `SUPABASE_JWT_SECRET`) as a config flag.** | Simpler default; faster opt-in. | Flip `IDENTITY_VERIFY_MODE=local`. |
+| Per-service or per-bounded-context deployments? | **One service per context.** | Smallest unit that owns a complete capability. | Merge embedding-service into llm-service if you're sure they'll never diverge. |
+| Database per service? | **Yes (documents-service owns its tables in Supabase; identity-service is stateless; knowledge-service owns Qdrant).** | Standard microservices hygiene. | Allow shared read views in Supabase, but no cross-service writes. |
+
+Tell me to flip any of these and I will.
+
+---
+
+## 13. What this plan delivers
+
+- **Six clearly bounded contexts**, each a small Rust crate with the same four-layer Clean Architecture shape. Identical mental model from one service to the next — a new contributor learns it once.
+- **One gateway, one frontend address.** External API surface is unchanged from today; everything else is behind the gateway.
+- **Zero direct framework imports outside `api/` and `infrastructure/`.** `domain/` and `application/` are pure. Lints enforce it.
+- **Every external dependency behind a port.** Mock-driven happy-path tests become trivial; CI gets real coverage without standing up OpenAI/Anthropic/Qdrant/Supabase.
+- **The currently-unused Supabase database/storage code becomes the engine of a real feature** (`documents-service`). Feature complexity grows, not shrinks.
+- **Inter-service auth, tracing, and configuration** are factored into shared crates so they are written once and used uniformly.
+- **`main` is deployable at every phase** of the migration.
+
+Two qualifiers, lead-developer-honest:
+
+- The "right" time to actually split processes is when the boundaries *hurt* inside the monolith — when two contexts are deployed on different rhythms, scaled differently, owned by different teams, or constrained by different SLAs. The template doesn't suffer that pain yet; the split here is pedagogical — it makes the architecture visible and gives users a ready-made layout to grow into. If you intend the template to *encourage* monolith-first usage, we can stop at Phase 1 (Clean Architecture monolith) and ship Phases 2–8 as an optional `microservices/` reference deployment behind a feature flag. Say the word and I'll structure it that way.
+- Operational cost goes up. Six containers, six logs, six health checks. The observability work in Phase 8 is not optional — it's what makes the cost survivable. Budget for it.
+
+That's the plan. Greenlight Phase 0 and I'll start.
