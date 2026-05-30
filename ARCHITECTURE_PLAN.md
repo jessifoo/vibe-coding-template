@@ -23,6 +23,64 @@ The previous audit's "delete the dead `services/supabase/*`" framing is replaced
 
 ---
 
+## 1.1 What we mean by "domain" (and why this lets you ship many apps)
+
+> "Domain" is overloaded. Disambiguating before the rest of this document gets misread:
+>
+> - **DNS / web domain** — `notes-ai.com`, the URL/host an app is reached at. Each app you ship has one (or a few).
+> - **Domain (Clean Architecture sense)** — the *subject matter* a chunk of code is about: identity, billing, scheduling, knowledge search, document management, chat. Each is a *bounded context* with its own entities, rules, ports, and use cases.
+>
+> Throughout this plan, "domain" means the **second** thing. Each of the six bounded contexts in §2 is a domain in that sense. The two meanings are independent — one app (= one DNS domain) is composed of *many* Clean-Architecture domains.
+
+### This is a template, not an app
+
+You said you want to spin up many different products (different URLs, different feature sets, different DBs) fast. That is exactly what this architecture is shaped for. The split is:
+
+- **Shared across every app you'll ever ship** — the `crates/` workspace (one error type, one bootstrap, one tracing init, one JWT scheme, one HTTP-client builder, the four-layer pattern enforced by lints). This is the **template**.
+- **Picked per app** — *which* Clean-Architecture domains the app instantiates, and *which* adapter backs each port. This is the **app**.
+
+So when you have idea #4 and want to spin it up, the shared crates come along for free; you only decide which domains the app has and which DBs back them.
+
+### Workflow for a new app
+
+1. **Fork (or copy) the workspace.** You get every shared crate plus the per-service skeletons for free.
+2. **Decide which domains the app needs.** Almost every product needs `identity` and `api-gateway`. The rest you pick:
+   - *AI note-taking:* `identity` + `llm` + `embedding` + `knowledge` + `documents`.
+   - *Scheduling SaaS:* `identity` + new `calendar` + new `notifications`; drop `llm`/`embedding`/`knowledge`.
+   - *AI customer support:* `identity` + `llm` + `knowledge` + new `chat`.
+   - *Multiplayer game lobby:* `identity` + new `lobby` backed by Redis; nothing else from the template.
+3. **Delete the services you don't need.** Cargo workspace — remove the entry, the shared crates are untouched.
+4. **Add the new domains.** Same four-layer cake (`domain/` → `application/` → `infrastructure/<vendor>/` → `api/`). Copy a template service directory, rename, wire its routes into the gateway. ~10 minutes for the skeleton.
+5. **Pick the adapter(s).** Each domain owns its persistence and external-service choices independently (see below).
+
+### "Different DBs" is just "different adapters behind the same port"
+
+The architecture treats persistence as an external dependency behind a port. The DB choice never leaks past the adapter, so swapping it is mechanical:
+
+| Domain | Today's default adapter | Swap looks like |
+|---|---|---|
+| `identity` | Supabase Auth | Auth0, Clerk, FusionAuth, raw JWT → new `AuthGateway` impl |
+| `documents` (metadata) | Supabase Database (Postgres via REST) | Postgres direct (`sqlx`), MongoDB, DynamoDB, SQLite → new `DocumentRepository` impl |
+| `documents` (files) | Supabase Storage | S3, R2, GCS, local disk → new `FileStore` impl |
+| `knowledge` (vectors) | Qdrant | Pinecone, Weaviate, pgvector, LanceDB → new `VectorIndex` impl |
+| `llm` | OpenAI + Anthropic | Bedrock, Vertex, Groq, Ollama (local) → new `TextGenerationGateway` impl |
+| `embedding` | OpenAI | Cohere, Voyage, BGE-local → new `EmbeddingGateway` impl |
+
+For a brand-new domain in a brand-new app — say `billing` — you choose the DB the same way: define a `BillingRepository` port in the new service's `domain/`, write a `StripeBillingAdapter` (or `PostgresBillingAdapter`, or `LemonSqueezyBillingAdapter`) in `infrastructure/`, wire it in `composition.rs`. Application code talks to the port; nothing else changes.
+
+### When you have 3+ apps live, promote the template to a private crate registry
+
+Phase 0 says "Cargo workspace." That's right for *one* app. The moment you have three apps sharing the same shared crates, fork-and-backport becomes a maintenance tax. At that point, publish `crates/*` to a private registry (Cloudsmith, ktra, or a `crates.io` org) and each app's `Cargo.toml` picks them up by version: `domain-core = "0.4"`, `service-runtime = "0.4"`. A bug fix in the shared crate goes to every app you have with one `cargo update`. The per-app code is unaffected — that was the whole point of factoring it out.
+
+If you stay at one app for a while, the workspace is fine. The decision to promote is reversible and entirely opt-in.
+
+### Two caveats worth being explicit about
+
+- **Some domains are "shared across the template," not "per app."** Identity is one of those — every app you ship will want JWT verification, OAuth exchange, an `AuthenticatedUser` value. Rather than re-writing the `identity` service per app, treat it as part of the template and let each app supply its own `IdentityConfig` (Supabase project, JWT secret, OAuth providers). Same for `api-gateway` — the routing tables are per-app, but the gateway *frame* is template.
+- **One bounded context per binary is not a law.** If app #N has three small domains that always deploy together, it is fine to start with them in one binary, with three properly-separated module trees inside. The architectural boundary (port + use case) is what matters; the process split is a deployment choice you can make per app. The template makes the split easy; it does not force it.
+
+---
+
 ## 2. Bounded Contexts
 
 Six contexts, derived from the existing feature set with no capability removed:
