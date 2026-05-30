@@ -141,6 +141,88 @@ backend/
 
 This split is what lets every service stay ~300–800 LOC of *its own* concerns, with the boilerplate factored out.
 
+### 3.2 Shared vs. per-service — the explicit map
+
+> Microservices, not duplication. Every cross-cutting concern lives in exactly one shared crate. Per-service code is reserved for *domain logic that is unique to that bounded context*. The table below is the literal source-to-destination map for every chunk in the current monolith — there is no ambiguity about where anything goes.
+
+**What lives in the shared crates (written once, used by every service):**
+
+| Concern | Current location | Future home |
+|---|---|---|
+| HTTP error type + `IntoResponse` | `backend/src/models/error.rs` — `AppError`, `ApiErrorResponse` | `domain-core::error` |
+| Fatal startup error | `backend/src/models/error.rs` — `AppRunError` | `domain-core::error` |
+| Authenticated principal | `backend/src/domain/auth.rs` — `AuthenticatedUser` | `domain-core::principal` |
+| Bearer-token parsing | `backend/src/http_auth.rs` | `domain-core::http_auth` |
+| Failed-response reader | `backend/src/http_error.rs` | `domain-core::http_error` |
+| Log-preview truncation | `backend/src/api/logging.rs` — `truncate_for_log`, `LOG_PREVIEW_CHARS` | `domain-core::logging` |
+| Axum bootstrap + tracing init + CORS layer | `backend/src/app.rs` — `build_app`, `init_tracing`, `build_cors_layer` | `service-runtime::bootstrap` |
+| Request-id + W3C `traceparent` middleware | scattered (today: `tower-http` only) | `service-runtime::middleware` |
+| `/healthz` + `/readyz` handlers | derived from current `/` | `service-runtime::health` |
+| Shared `reqwest::Client` builder | `backend/src/api/state.rs` | `service-runtime::http_client` |
+| Common config primitives (`ServerConfig`, `CorsConfig`, `Environment`, `HttpTimeouts`, `SettingsError`) | `backend/src/config/mod.rs` | `service-runtime::config` |
+| Internal-auth token issuer + verifier | new | `internal-auth` |
+| All cross-service DTOs + validator annotations | `backend/src/models/{auth,llm,vectordb}.rs` | `contracts::v1::{identity,llm,embedding,knowledge,documents}` |
+| Provider enum `LlmProvider`, `LlmUsage` | `backend/src/models/llm.rs` | `contracts::v1::llm` |
+| Typed clients for each downstream service | new | `clients::{identity,llm,embedding,knowledge,documents}` |
+
+There is **one** of each. Every service imports them. No service is allowed to re-define them — enforced by `cargo deny` + workspace lints.
+
+**What lives per-service (unique to that bounded context):**
+
+| Concern | Owner |
+|---|---|
+| Narrow domain error enum (e.g. `AuthDomainError`, `KnowledgeDomainError`) | `services/<name>-service/src/domain/error.rs` |
+| Domain entities (e.g. `Document`, `SearchResult`, `TextGenerationOutcome`) | `services/<name>-service/src/domain/entities.rs` |
+| Domain ports / traits (e.g. `AuthGateway`, `VectorIndex`, `EmbeddingGateway`, `DocumentRepository`, `FileStore`) | `services/<name>-service/src/domain/ports.rs` |
+| Use cases (e.g. `GenerateText`, `IndexDocument`, `UploadDocument`) | `services/<name>-service/src/application/` |
+| Vendor adapters (e.g. `OpenAiTextGenerationAdapter`, `SupabaseAuthGateway`, `QdrantVectorIndex`, `SupabaseDatabaseAdapter`) | `services/<name>-service/src/infrastructure/<vendor>/adapter.rs` |
+| Vendor wire types (e.g. `AnthropicRequest`, `OpenAiEmbeddingResponse`) | `services/<name>-service/src/infrastructure/<vendor>/wire.rs` |
+| Axum routes + handlers | `services/<name>-service/src/api/` |
+| Per-service config knobs (e.g. `OpenAiConfig`, `AnthropicConfig`, `QdrantConfig`, `SupabaseConfig`) | `services/<name>-service/src/config.rs` |
+
+### 3.3 Two principles that keep §3.2 honest
+
+1. **Domain errors are narrow per-service enums; the HTTP error response is the single shared type.** Each service defines its own `<Context>DomainError` (transport-agnostic, only the variants it actually needs). The `api/` layer of that service has a single ~6-line `map_<context>_error()` function that funnels it into the shared `AppError` from `domain-core`. This is not duplication — it is the architectural seam. Today's `backend/src/api/auth_handler.rs::map_auth_error` (5 match arms) is the template; every service will have exactly one of those.
+
+2. **No grab-bag `utils` crate.** Every shared concern has a *named* module in `domain-core` or `service-runtime`. The moment we'd be tempted to create `utils/`, that means we have not understood the concern well enough to name it. `bearer_token_from_value` lives in `domain-core::http_auth`; `truncate_for_log` lives in `domain-core::logging`; the `reqwest::Client` builder lives in `service-runtime::http_client`. If a new helper appears that fits neither, we name a new module — never a generic one.
+
+### 3.4 Dependency graph (arrows = depends on)
+
+```
+                         ┌────────────────────┐
+                         │      contracts     │   DTOs only, no logic
+                         └─────────┬──────────┘
+                                   │
+       ┌───────────────────────────┼───────────────────────────┐
+       │                           │                           │
+       ▼                           ▼                           ▼
+┌─────────────┐         ┌───────────────────┐         ┌────────────────┐
+│ domain-core │ ◄────── │  service-runtime  │ ◄────── │    clients     │
+│   error     │         │   bootstrap       │         │  (per service) │
+│   principal │         │   middleware      │         └───────┬────────┘
+│   http_auth │         │   health          │                 │
+│   http_error│         │   http_client     │                 │
+│   logging   │         │   config          │                 │
+└──────┬──────┘         └─────────┬─────────┘                 │
+       │                          │                           │
+       │                          ▼                           │
+       │              ┌───────────────────────┐               │
+       │              │     internal-auth     │               │
+       │              │  issuer (gateway)     │               │
+       │              │  verifier (downstream)│               │
+       │              └───────────┬───────────┘               │
+       │                          │                           │
+       └──────────────┬───────────┴────────────┬──────────────┘
+                      ▼                        ▼
+   ┌─────────────────────────────────────────────────────────┐
+   │   services/<each>-service                               │
+   │     domain/  application/  infrastructure/  api/        │
+   │     (only domain-specific code lives here)              │
+   └─────────────────────────────────────────────────────────┘
+```
+
+Shared crates never depend on services. Services never depend on each other directly — they go through `clients/`. There are no cycles, and the dependency direction matches the architectural direction.
+
 ---
 
 ## 4. Inter-service Contracts
