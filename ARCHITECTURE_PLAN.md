@@ -137,6 +137,51 @@ The rest of this document describes the architecture in terms that *also work* f
 
 ---
 
+## 1.3 The actual goal: guardrailing AI code quality
+
+> Updated framing after your follow-up: *"This is a template for quick startup, and the main goal is restricting the code quality AI can write."*
+
+Clean Architecture is a means, not the end. The end is: **when you (or an AI agent acting on your behalf) add a feature to an app spun up from this template, it should be hard to produce code that's wrong, sloppy, or unsafe, and easy to produce code that's correct, typed, tested, and consistent.**
+
+The repo already states this intent in `README.md` ("Maximum Guardrails", "Compiler as Guardian") and `AGENTS.md` (the NEVER/ALWAYS lists). This plan now treats *that* as the headline goal and re-explains the Clean-Architecture work as one of several tools that serve it.
+
+### Leverage hierarchy
+
+Guardrails operate at five tiers. Higher tiers do more work because they require less goodwill from the AI:
+
+| Tier | Mechanism | When it fires |
+|---|---|---|
+| **1** | **Compiler refuses to compile bad code** | Before the agent finishes its turn |
+| **2** | **CI refuses to merge bad code** | Before a human reviews |
+| **3** | **Repo structure makes the right thing easy and the wrong thing hard** | While the agent is writing |
+| **4** | **The agent is told the rules** | Before the agent starts |
+| **5** | **Human review catches what slipped through** | Last line of defense |
+
+This template **leans heavily on tiers 1 and 4 today**, lightly on 2 and 5, and barely on 3. The Clean-Architecture work in §2–§10 is principally an investment in tier 3, with side benefits at tiers 1 and 2 (more lints, more layers, more typed boundaries). §14 enumerates each guardrail and its current/proposed status; the rest of this section explains why the Clean-Architecture parts of the plan earn their keep against this goal.
+
+### How the architecture guardrails AI code
+
+When `domain/` doesn't import `axum` and `application/` doesn't import `reqwest`, an AI is *prevented* from sprawling HTTP handling into business logic or skipping the adapter when it calls Supabase. It cannot do those things because the symbols are not in scope. This is tier-3 enforcement of separation of concerns, expressed as a Cargo dependency rule rather than a code-review rule.
+
+When every external dependency sits behind a port and use cases consume the trait (not the concrete), an AI extending a feature has exactly one place to put its change. It also has a trivially-mockable seam, so the AI will write tests (easy = it writes them; hard = it skips them).
+
+When new features follow a per-context *template* (copy `app/src/llm/`, rename, fill in), the AI's freelancing surface area shrinks dramatically. There is a shape to follow.
+
+When the four-layer rules are enforced by `cargo deny`'s `bans` table and clippy's `disallowed_methods`, "you forgot to use the shared `reqwest::Client`" becomes a compile error, not a code-review nit.
+
+### Fast-path ordering (if guardrails are what you want most)
+
+The migration plan (§10) is ordered around architectural completeness. If your priority is *guardrails first, architecture second*, the higher-leverage ordering is:
+
+1. **Tighten tiers 1 and 2 first** (small, mostly mechanical, biggest immediate effect on AI output): add `clippy::disallowed_methods` for the patterns the audit found bad; add `cargo deny`/`cargo audit`/`cargo machete` to `make agent-verify`; add a real `.github/workflows/ci.yml` so CI gates exist (today the project has *no* CI workflow committed); add a PR template that asks for the AGENTS.md checklist. Half a day of work; pays off immediately.
+2. **Then Phase A + B** (Clean-Architecture tier-3 work). Now that tiers 1 and 2 are tight, Phase B's port/adapter restructure has somewhere to plug *new* lints into (`disallowed_types` against `Box<dyn Error>`, dependency bans against `axum` in `domain-core`, etc.).
+3. **Then Phase C** (audit polish + a11y).
+4. **Phase D only if a single context starts hurting.**
+
+§14 maps every guardrail to one of these steps so you can see what lands when.
+
+---
+
 ## 2. Bounded Contexts
 
 Six contexts, derived from the existing feature set with no capability removed:
@@ -598,7 +643,94 @@ Optionally, later, **per context, per app, only if needed** (Phase D):
 
 ### Two lead-developer-honest qualifiers
 
-- **For a first app, even Phase B is non-trivial up-front investment.** If you genuinely have lots of ideas and intend to ship many products from this template, that investment amortizes fast — every app after #1 reuses the shared crates and the per-context template directories. If you only ever ship one product, a simpler single-module setup would have been faster. Heads up.
 - **The split-process apparatus (`internal-auth`, `clients`, traceparent propagation across boundaries) is dormant in the default template.** Those crates exist with minimal code so that Phase D extraction is mechanical when you need it. They cost ~zero in compile time and zero at runtime until you reach for them.
+- **The architectural work in Phases A + B is real investment.** It pays off across every app you spin from this template *and* tightens the AI-guardrail story (§1.3). If your priority is the guardrails specifically, the §1.3 fast-path order lets you cash some of that in before Phase A starts.
 
-That's the plan. Greenlight **Phase A** and I'll start.
+---
+
+## 14. Guardrails Inventory
+
+Every guardrail named in the plan, with current state and where it lives. ✅ = already in place; 🟡 = exists but should be strengthened; 🆕 = to add.
+
+### Tier 1 — Compiler refuses to compile bad code
+
+| Status | Guardrail | Location |
+|---|---|---|
+| ✅ | `clippy::unwrap_used = deny` | `backend/Cargo.toml` `[lints.clippy]` |
+| ✅ | `clippy::expect_used = deny` | `backend/Cargo.toml` |
+| ✅ | `unsafe_code = forbid` | `backend/Cargo.toml` `[lints.rust]` |
+| ✅ | `clippy::all = warn` (priority -1) | `backend/Cargo.toml` |
+| ✅ | `allow-unwrap-in-tests = true` (so test code isn't fighting the lint) | `backend/clippy.toml` |
+| ✅ | `@typescript-eslint/no-explicit-any: error` | `frontend/.eslintrc.json` |
+| ✅ | `no-debugger: error`, `no-console: warn` | `frontend/.eslintrc.json` |
+| ✅ | Zod runtime validation on every API boundary | `frontend/lib/api-types.ts`, `frontend/services/llm.ts` |
+| 🟡 | Promote Rust lints to `[workspace.lints]` so every crate inherits | new workspace root in Phase A |
+| 🆕 | `clippy::todo = deny`, `clippy::unimplemented = deny`, `clippy::dbg_macro = deny`, `clippy::print_stdout = deny` (let `tracing` be the only logger) | `[workspace.lints.clippy]` |
+| 🆕 | `clippy::disallowed_methods` for: `Result::unwrap_or_default`, `reqwest::Client::new` (force shared builder from `service-runtime::http_client`), `chrono::Local::now` (force UTC), `std::env::var` outside `service-runtime::config` | extend `backend/clippy.toml` |
+| 🆕 | `clippy::disallowed_types` for: `Box<dyn std::error::Error>` (force `AppError` or context-specific domain error), `HashMap<String, String>` in DTOs that should be a typed struct | `backend/clippy.toml` |
+| 🆕 | `#[non_exhaustive]` on `AppError` so pattern matches must include a `_ =>` arm (prevents the AI from forgetting to handle a future variant) | `crates/domain-core/src/error.rs` (Phase A) |
+| 🆕 | Code-gen TypeScript Zod schemas from Rust DTOs (`ts-rs` or `schemars` + `openapi-typescript`) — contracts cannot drift between backend and frontend | `crates/contracts/build.rs` (Phase A) |
+| 🆕 | `tsconfig.json`: `strict: true`, `noUncheckedIndexedAccess: true`, `noImplicitOverride: true` (verify; current setting may already be strict) | `frontend/tsconfig.json` |
+
+### Tier 2 — CI refuses to merge bad code
+
+| Status | Guardrail | Location |
+|---|---|---|
+| ✅ | `cargo clippy --all-targets -- -D warnings` | `Makefile`, `scripts/verify-agent-toolchain.sh` |
+| ✅ | `cargo fmt --check` | same |
+| ✅ | `cargo test` | same |
+| ✅ | `npm run lint`, `npm run build` | same |
+| ✅ | `make agent-verify` aggregate | Makefile |
+| 🆕 | **`.github/workflows/ci.yml`** — today the repo has *no committed CI workflow*; `make agent-verify` is the gate but has to be run. Add a workflow that runs it on every PR and blocks merge on red | new `.github/workflows/ci.yml` |
+| 🆕 | `cargo deny check` with a `deny.toml` covering: license allow-list, security advisories, per-crate dependency bans (e.g. `axum` not allowed in `domain-core`) | new `deny.toml` |
+| 🆕 | `cargo audit` for security advisories | add to `make agent-verify` + CI |
+| 🆕 | `cargo machete` for unused dependencies | add to `make agent-verify` + CI |
+| 🆕 | `cargo llvm-cov` with a coverage floor (start at 60%, ratchet up; fails CI if it drops) | CI |
+| 🆕 | Branch protection on `main` requiring all of the above green | repo settings (manual one-time) |
+| 🆕 | Pre-commit hooks (`lefthook` recommended over `pre-commit` for Rust speed) running clippy + fmt + eslint on staged files | new `lefthook.yml` |
+
+### Tier 3 — Repo structure makes the right thing easy and the wrong thing hard
+
+| Status | Guardrail | Location |
+|---|---|---|
+| 🟡 | `domain::auth` + `application::auth` + `infrastructure::supabase::auth_gateway` exist (PR #36). Other contexts (`llm`, `embedding`, `knowledge`, `documents`) don't yet — they're in the `services/` layer with framework + business logic mixed | Fixed in Phase B |
+| 🆕 | Per-crate Cargo dependency bans enforced by `cargo deny`'s `bans` (e.g. `axum`, `reqwest`, `qdrant-client`, `async-openai` forbidden in `domain-core`; `axum` forbidden in `application/` modules) | `deny.toml` + Phase A |
+| 🆕 | `pub(crate)` discipline inside contexts so only `build_router` + DTOs + ports + the error mapping are exposed to siblings; `cargo modules` snapshot in CI to catch drift | Phase B + CI |
+| 🆕 | Per-context template directory (copy-this-context) for spinning up a new bounded context | `.cursor/rules/templates/context/` (Phase B) |
+| 🆕 | "Spin up a new app" generator script that asks "which contexts? which adapters?" and wires `main.rs` + `composition.rs` accordingly | `scripts/new-app.sh` (post-Phase B) |
+| 🆕 | Sanitized 5xx responses (audit §2.2): the shared error response in `domain-core::error` *cannot* expose upstream details — the only public field is `error` + `request_id`. Even if the AI types the wrong `.to_string()` into a 5xx variant, the wire format can't leak | `crates/domain-core/src/error.rs` (Phase B) |
+| 🆕 | Shared `reqwest::Client` is the only one constructable (`Client::new` banned via tier-1 disallowed_methods); the AI can't create per-request clients even by accident | tier-1 + Phase B |
+
+### Tier 4 — The AI is told the rules
+
+| Status | Guardrail | Location |
+|---|---|---|
+| ✅ | Comprehensive `AGENTS.md` with NEVER/ALWAYS lists, project patterns, Cursor-Cloud-specific instructions | `AGENTS.md` |
+| ✅ | `.cursor/rules/` with `ai-guidelines.mdc`, per-stack rules (`backend/`, `frontend/`), and `templates/` | `.cursor/rules/` |
+| ✅ | `CODE_STANDARDS.md` (425 lines of golden rules) | root |
+| 🆕 | `.github/PULL_REQUEST_TEMPLATE.md` enforcing the AGENTS.md checklist: clippy clean, tests added, no `unwrap`, no `any`, doc comments on public items | new |
+| 🆕 | `CONTRIBUTING.md` codifying Conventional Commits (the project already does this informally — commit history is clean) | new |
+| 🆕 | Refresh `AGENTS.md` after Phase B so the example patterns cited (`SupabaseDatabaseService::new()?`) match the new layout (`ports::DocumentRepository`) | Phase B follow-up |
+| 🆕 | Per-context "how to extend this context" mini-README so the AI gets context-specific instructions when editing in that subtree | one `README.md` per `app/src/<ctx>/` |
+
+### Tier 5 — Human review
+
+| Status | Guardrail | Location |
+|---|---|---|
+| ✅ | CodeRabbit-style review on PRs (visible in recent commit history; e.g. `f667024 fix: apply CodeRabbit auto-fixes`) | already integrated |
+| 🆕 | `.github/CODEOWNERS` so reviews are required for sensitive paths — `crates/` (shared template) gets stricter review than `app/src/<ctx>/` (per-app code) | new |
+| 🆕 | PR size limits (label-based or workflow-enforced) — pushes the AI to make focused changes instead of dumping 30-file diffs | optional, low priority |
+
+### Recommended order (if guardrails are the priority)
+
+1. **Land tier 1 + 2 quick wins** (single PR each, no architecture changes required):
+   - Add `disallowed_methods` + `disallowed_types` to `backend/clippy.toml`.
+   - Add `deny.toml` + `cargo audit` + `cargo machete` to `make agent-verify`.
+   - Add `.github/workflows/ci.yml` calling `make agent-verify`.
+   - Add `.github/PULL_REQUEST_TEMPLATE.md`.
+2. **Then Phase A** (workspace + shared crates). Tier-3 boundaries exist; tier-1/2 lints now have stronger statements to make.
+3. **Then Phase B** (modular contexts). Adds the architectural guardrails (`axum` banned in `domain-core` via `deny.toml`, sanitized 5xx via `domain-core::error`, mandatory adapters, etc.).
+4. **Then Phase C** (audit polish + AGENTS.md refresh).
+5. **Phase D only if a single context starts hurting operationally.**
+
+That's the plan. Greenlight whichever phase, and I'll start.
