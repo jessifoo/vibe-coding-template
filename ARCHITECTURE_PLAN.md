@@ -664,11 +664,12 @@ Every guardrail named in the plan, with current state and where it lives. ✅ = 
 | ✅ | `@typescript-eslint/no-explicit-any: error` | `frontend/.eslintrc.json` |
 | ✅ | `no-debugger: error`, `no-console: warn` | `frontend/.eslintrc.json` |
 | ✅ | Zod runtime validation on every API boundary | `frontend/lib/api-types.ts`, `frontend/services/llm.ts` |
+| ✅ | `clippy::todo = deny`, `clippy::unimplemented = deny`, `clippy::dbg_macro = deny`, `clippy::print_stdout = deny` | `backend/Cargo.toml` `[lints.clippy]` |
+| ✅ | `clippy::disallowed_methods` for `Result::unwrap_or_default` (Result variant only — Option remains allowed) and `chrono::Local::now`/`today` (force UTC) | `backend/clippy.toml` |
+| ✅ | `#[non_exhaustive]` on `AppError` so pattern matches must include a `_ =>` arm | `backend/src/models/error.rs` |
 | 🟡 | Promote Rust lints to `[workspace.lints]` so every crate inherits | new workspace root in Phase A |
-| 🆕 | `clippy::todo = deny`, `clippy::unimplemented = deny`, `clippy::dbg_macro = deny`, `clippy::print_stdout = deny` (let `tracing` be the only logger) | `[workspace.lints.clippy]` |
-| 🆕 | `clippy::disallowed_methods` for: `Result::unwrap_or_default`, `reqwest::Client::new` (force shared builder from `service-runtime::http_client`), `chrono::Local::now` (force UTC), `std::env::var` outside `service-runtime::config` | extend `backend/clippy.toml` |
-| 🆕 | `clippy::disallowed_types` for: `Box<dyn std::error::Error>` (force `AppError` or context-specific domain error), `HashMap<String, String>` in DTOs that should be a typed struct | `backend/clippy.toml` |
-| 🆕 | `#[non_exhaustive]` on `AppError` so pattern matches must include a `_ =>` arm (prevents the AI from forgetting to handle a future variant) | `crates/domain-core/src/error.rs` (Phase A) |
+| 🆕 | `clippy::disallowed_methods` for `reqwest::Client::new` (force shared builder from `service-runtime::http_client`) and `std::env::var` outside `service-runtime::config` | extend `backend/clippy.toml` in Phase A (the shared homes need to exist first) |
+| 🆕 | `clippy::disallowed_types` for parameterized types like `Box<dyn Error>` — note: clippy currently rejects parameterized paths as "unreachable"; this rule lives at tier 4 (AGENTS.md) until clippy supports it | tracked in `backend/clippy.toml` comments |
 | 🆕 | Code-gen TypeScript Zod schemas from Rust DTOs (`ts-rs` or `schemars` + `openapi-typescript`) — contracts cannot drift between backend and frontend | `crates/contracts/build.rs` (Phase A) |
 | 🆕 | `tsconfig.json`: `strict: true`, `noUncheckedIndexedAccess: true`, `noImplicitOverride: true` (verify; current setting may already be strict) | `frontend/tsconfig.json` |
 
@@ -681,10 +682,13 @@ Every guardrail named in the plan, with current state and where it lives. ✅ = 
 | ✅ | `cargo test` | same |
 | ✅ | `npm run lint`, `npm run build` | same |
 | ✅ | `make agent-verify` aggregate | Makefile |
-| 🆕 | **`.github/workflows/ci.yml`** — today the repo has *no committed CI workflow*; `make agent-verify` is the gate but has to be run. Add a workflow that runs it on every PR and blocks merge on red | new `.github/workflows/ci.yml` |
-| 🆕 | `cargo deny check` with a `deny.toml` covering: license allow-list, security advisories, per-crate dependency bans (e.g. `axum` not allowed in `domain-core`) | new `deny.toml` |
-| 🆕 | `cargo audit` for security advisories | add to `make agent-verify` + CI |
-| 🆕 | `cargo machete` for unused dependencies | add to `make agent-verify` + CI |
+| ✅ | **`.github/workflows/ci.yml`** runs `make agent-verify` on every PR + push to `main` | `.github/workflows/ci.yml` |
+| ✅ | `cargo deny check` with `deny.toml` covering license allow-list, advisory ignores (with rationale per ignore), source allow-list, wildcard bans | `backend/deny.toml`, `make deny-backend` |
+| ✅ | `cargo machete` for unused dependencies (already caught & removed `chrono` + `jsonwebtoken`) | `make machete-backend` |
+| ✅ | Dead `jsonwebtoken` dependency dropped (audit §2.1 finding) | `backend/Cargo.toml` |
+| ✅ | Dead `chrono` dependency dropped | `backend/Cargo.toml` |
+| ✅ | Audit §2.4 fix: `serde_json::to_string(&doc_content).unwrap_or_default()` → propagates `AppError::Internal` (lossless) | `backend/src/services/vectordb/qdrant.rs` |
+| 🆕 | `cargo audit` standalone (currently covered by `cargo deny check advisories`; only add if we need finer-grained CI separation) | optional |
 | 🆕 | `cargo llvm-cov` with a coverage floor (start at 60%, ratchet up; fails CI if it drops) | CI |
 | 🆕 | Branch protection on `main` requiring all of the above green | repo settings (manual one-time) |
 | 🆕 | Pre-commit hooks (`lefthook` recommended over `pre-commit` for Rust speed) running clippy + fmt + eslint on staged files | new `lefthook.yml` |
@@ -708,7 +712,7 @@ Every guardrail named in the plan, with current state and where it lives. ✅ = 
 | ✅ | Comprehensive `AGENTS.md` with NEVER/ALWAYS lists, project patterns, Cursor-Cloud-specific instructions | `AGENTS.md` |
 | ✅ | `.cursor/rules/` with `ai-guidelines.mdc`, per-stack rules (`backend/`, `frontend/`), and `templates/` | `.cursor/rules/` |
 | ✅ | `CODE_STANDARDS.md` (425 lines of golden rules) | root |
-| 🆕 | `.github/PULL_REQUEST_TEMPLATE.md` enforcing the AGENTS.md checklist: clippy clean, tests added, no `unwrap`, no `any`, doc comments on public items | new |
+| ✅ | `.github/PULL_REQUEST_TEMPLATE.md` enforcing the AGENTS.md checklist (Rust + TS + API/data sections, manual-testing field) | `.github/PULL_REQUEST_TEMPLATE.md` |
 | 🆕 | `CONTRIBUTING.md` codifying Conventional Commits (the project already does this informally — commit history is clean) | new |
 | 🆕 | Refresh `AGENTS.md` after Phase B so the example patterns cited (`SupabaseDatabaseService::new()?`) match the new layout (`ports::DocumentRepository`) | Phase B follow-up |
 | 🆕 | Per-context "how to extend this context" mini-README so the AI gets context-specific instructions when editing in that subtree | one `README.md` per `app/src/<ctx>/` |
@@ -718,19 +722,24 @@ Every guardrail named in the plan, with current state and where it lives. ✅ = 
 | Status | Guardrail | Location |
 |---|---|---|
 | ✅ | CodeRabbit-style review on PRs (visible in recent commit history; e.g. `f667024 fix: apply CodeRabbit auto-fixes`) | already integrated |
-| 🆕 | `.github/CODEOWNERS` so reviews are required for sensitive paths — `crates/` (shared template) gets stricter review than `app/src/<ctx>/` (per-app code) | new |
+| ✅ | `.github/CODEOWNERS` requiring reviewer for guardrail config (`.github/`, `AGENTS.md`, `clippy.toml`, `deny.toml`, lint configs, lockfiles) | `.github/CODEOWNERS` |
 | 🆕 | PR size limits (label-based or workflow-enforced) — pushes the AI to make focused changes instead of dumping 30-file diffs | optional, low priority |
 
 ### Recommended order (if guardrails are the priority)
 
-1. **Land tier 1 + 2 quick wins** (single PR each, no architecture changes required):
-   - Add `disallowed_methods` + `disallowed_types` to `backend/clippy.toml`.
-   - Add `deny.toml` + `cargo audit` + `cargo machete` to `make agent-verify`.
-   - Add `.github/workflows/ci.yml` calling `make agent-verify`.
-   - Add `.github/PULL_REQUEST_TEMPLATE.md`.
-2. **Then Phase A** (workspace + shared crates). Tier-3 boundaries exist; tier-1/2 lints now have stronger statements to make.
-3. **Then Phase B** (modular contexts). Adds the architectural guardrails (`axum` banned in `domain-core` via `deny.toml`, sanitized 5xx via `domain-core::error`, mandatory adapters, etc.).
-4. **Then Phase C** (audit polish + AGENTS.md refresh).
+1. ✅ **Tier 1 + 2 quick wins** — **landed in this PR**:
+   - `clippy::todo/unimplemented/dbg_macro/print_stdout = deny`.
+   - `clippy::disallowed_methods` for `Result::unwrap_or_default` + `chrono::Local::now`.
+   - `#[non_exhaustive]` on `AppError`.
+   - `cargo deny check` (advisories, licenses, sources, bans) wired into `make supply-chain-backend` and `make agent-verify`.
+   - `cargo machete` wired in (and caught + cleaned `chrono` + `jsonwebtoken` dead deps).
+   - Audit §2.4 fix: `qdrant.rs` no longer silently loses document text on serialization failure.
+   - `.github/workflows/ci.yml` running `make agent-verify` on every PR (the repo previously had no committed CI).
+   - `.github/PULL_REQUEST_TEMPLATE.md` mirroring the AGENTS.md checklist.
+   - `.github/CODEOWNERS` requiring review for guardrail config + lint files + lockfiles.
+2. **Phase A** (workspace + shared crates). Tier-3 boundaries exist; lint statements can be expressed per-crate.
+3. **Phase B** (modular contexts). Adds the architectural guardrails (`axum` banned in `domain-core` via `deny.toml`, sanitized 5xx via `domain-core::error`, mandatory adapters, etc.).
+4. **Phase C** (audit polish + AGENTS.md refresh).
 5. **Phase D only if a single context starts hurting operationally.**
 
-That's the plan. Greenlight whichever phase, and I'll start.
+That's the plan. Tier 1+2 is done. Greenlight Phase A next when ready.
