@@ -150,17 +150,22 @@ impl QdrantService {
             .map(|(i, ((doc, embedding), id))| {
                 let mut payload = HashMap::new();
 
-                // Add document content
+                // Add document content. Serialization failure here would lose
+                // the document text silently, so map to AppError::Internal and
+                // propagate via `collect::<Result<_, _>>()?` below.
                 let mut doc_content = HashMap::new();
                 doc_content.insert("text".to_string(), JsonValue::String(doc.text.clone()));
                 if let Some(title) = &doc.title {
                     doc_content.insert("title".to_string(), JsonValue::String(title.clone()));
                 }
+                let doc_payload = serde_json::to_string(&doc_content).map_err(|e| {
+                    AppError::Internal(format!(
+                        "Failed to serialize document payload for indexing: {e}"
+                    ))
+                })?;
                 payload.insert(
                     "document".to_string(),
-                    qdrant_client::qdrant::Value::from(
-                        serde_json::to_string(&doc_content).unwrap_or_default(),
-                    ),
+                    qdrant_client::qdrant::Value::from(doc_payload),
                 );
 
                 // Add metadata
@@ -185,9 +190,13 @@ impl QdrantService {
                     qdrant_client::qdrant::Value::from(owner_user_id.to_string()),
                 );
 
-                PointStruct::new(id.clone(), embedding.clone(), payload)
+                Ok::<PointStruct, AppError>(PointStruct::new(
+                    id.clone(),
+                    embedding.clone(),
+                    payload,
+                ))
             })
-            .collect();
+            .collect::<Result<Vec<PointStruct>, AppError>>()?;
 
         self.client
             .upsert_points(UpsertPointsBuilder::new(&self.collection_name, points))

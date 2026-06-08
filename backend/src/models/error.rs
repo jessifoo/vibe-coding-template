@@ -65,7 +65,12 @@ pub enum AppRunError {
 }
 
 /// Application error type.
+///
+/// `#[non_exhaustive]` so external pattern matches must include a `_ =>` arm.
+/// This is an AI-guardrail (see `ARCHITECTURE_PLAN.md` §14): adding a new
+/// variant later cannot silently fall through callers that forgot to handle it.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum AppError {
     #[error("Authentication failed: {0}")]
     Unauthorized(String),

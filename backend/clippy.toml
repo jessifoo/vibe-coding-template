@@ -1,3 +1,38 @@
 # Allow unwrap/expect in #[test] / #[tokio::test] only (matches project rules).
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+
+# AI-guardrail tier-1 method bans (see ARCHITECTURE_PLAN.md §14).
+#
+# The list is intentionally narrow: only methods whose default behaviour
+# silently destroys information that a discerning reviewer would not let
+# slip. Methods banned here should each have a clear, mechanical replacement.
+#
+# - core::result::Result::unwrap_or_default
+#       Silently discards `Err(_)`. Use `?`, `.unwrap_or_else(|e| ...)`,
+#       or map into `AppError` instead. Note that Option::unwrap_or_default
+#       remains allowed (it has no error to discard).
+# - chrono::Local::now / chrono::Local::today
+#       Time should be in UTC at storage / API boundaries. Use
+#       `chrono::Utc::now()` (or `time::OffsetDateTime::now_utc()`).
+disallowed-methods = [
+    { path = "core::result::Result::unwrap_or_default", reason = "Silently drops the Err(_) — use `?`, .unwrap_or_else(|e| ...), or map into AppError" },
+    { path = "std::result::Result::unwrap_or_default", reason = "Silently drops the Err(_) — use `?`, .unwrap_or_else(|e| ...), or map into AppError" },
+    { path = "chrono::Local::now", reason = "Use chrono::Utc::now(); local-timezone time leaks host config into wire formats" },
+    { path = "chrono::Local::today", reason = "Use chrono::Utc::now().date_naive(); local-timezone time leaks host config" },
+]
+
+# AI-guardrail tier-1 type bans (currently none).
+#
+# Note on `Box<dyn Error>`:
+#   Clippy's `disallowed-types` config bans types by path, but `Box<dyn Error>`
+#   is a generic instantiation rather than a distinct type path; the
+#   parameterized form is rejected as "unreachable" by clippy. Disallowing
+#   `alloc::boxed::Box` itself would ban legitimate uses. The "no Box<dyn Error>"
+#   rule therefore lives at tier 4 (AGENTS.md) and is enforced by the typed
+#   `AppError` / `AppRunError` / per-context domain-error pattern at tier 3.
+#
+# Add entries here only when both:
+#   (a) the path resolves to a concrete type, and
+#   (b) there is a clear mechanical replacement.
+disallowed-types = []
