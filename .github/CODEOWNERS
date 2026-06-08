@@ -1,0 +1,37 @@
+# CODEOWNERS — required reviewers per path.
+#
+# Tier-5 AI-guardrail (see ARCHITECTURE_PLAN.md §1.3, §14): force a human
+# review for changes that affect the bones of the template, where mistakes
+# compound across every app spun up from this codebase.
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-configuration/customizing-your-repository/about-code-owners
+#
+# Order matters; the LAST matching pattern wins. Patterns are evaluated
+# bottom-up by GitHub, so the catch-all is at the top.
+
+# Default owner for everything not matched below.
+*                                @jessifoo
+
+# Guardrail and CI configuration: anything that affects how AI code is
+# allowed to land in this repo. Treat every change here with extra care.
+/.github/                        @jessifoo
+/scripts/verify-agent-toolchain.sh @jessifoo
+/AGENTS.md                       @jessifoo
+/CODE_STANDARDS.md               @jessifoo
+/ARCHITECTURE_PLAN.md            @jessifoo
+/CODE_REVIEW.md                  @jessifoo
+/.cursor/rules/                  @jessifoo
+
+# Backend lint / dependency policy: changing these effectively rewrites the
+# rules every other PR is held to.
+/backend/Cargo.toml              @jessifoo
+/backend/Cargo.lock              @jessifoo
+/backend/clippy.toml             @jessifoo
+/backend/deny.toml               @jessifoo
+/backend/rust-toolchain.toml     @jessifoo
+
+# Frontend lint config — same reasoning as backend lint config.
+/frontend/.eslintrc.json         @jessifoo
+/frontend/tsconfig.json          @jessifoo
+/frontend/package.json           @jessifoo
+/frontend/package-lock.json      @jessifoo
