@@ -68,6 +68,26 @@ echo "==> backend: cargo clippy"
 echo "==> backend: cargo test"
 (cd "${ROOT}/backend" && cargo test -q)
 
+# Tier-2 supply-chain gates (see ARCHITECTURE_PLAN.md §14).
+# Soft-fail with a clear message if the binary is absent so this script still
+# runs on minimal toolchains (e.g. first-time provisioning before
+# `make install-backend`). CI installs them explicitly.
+if command -v cargo-deny >/dev/null 2>&1; then
+  echo "==> backend: cargo deny check"
+  (cd "${ROOT}/backend" && cargo deny check)
+else
+  echo "warning: cargo-deny not installed; skipping supply-chain advisory + license check." >&2
+  echo "         install with: cargo install --locked cargo-deny" >&2
+fi
+
+if command -v cargo-machete >/dev/null 2>&1; then
+  echo "==> backend: cargo machete"
+  (cd "${ROOT}/backend" && cargo machete)
+else
+  echo "warning: cargo-machete not installed; skipping unused-deps check." >&2
+  echo "         install with: cargo install --locked cargo-machete" >&2
+fi
+
 echo "==> frontend: npm run lint"
 (cd "${ROOT}/frontend" && npm run lint)
 

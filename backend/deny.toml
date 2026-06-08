@@ -1,0 +1,75 @@
+# cargo-deny configuration for the `backend` crate.
+#
+# Tier-2 guardrail (see ARCHITECTURE_PLAN.md §14): every dependency in the
+# tree is checked for known security advisories, license compatibility, and
+# allowed-source provenance. CI runs `cargo deny check` on every PR.
+#
+# Run locally with:
+#   cd backend && cargo deny check
+#
+# Adding a dependency that fails this check requires either fixing the upstream
+# issue, switching the dependency, or explicitly extending one of the lists
+# below with a justification in this file.
+
+# Security advisories from RustSec.
+[advisories]
+version = 2
+# Deny everything; the only escape hatch is an explicit `ignore` entry below
+# with a justification comment. Yanked crates fail the build by default.
+yanked = "deny"
+ignore = [
+    # Each ignore is an `unmaintained` advisory (informational; no known
+    # security exploit) on a deeply transitive crate with no first-party
+    # fix available today. Each must include the upstream link, the path
+    # it arrives via, and a rationale. Revisit on every `cargo update`.
+    { id = "RUSTSEC-2025-0012", reason = "backoff: unmaintained, transitive via async-openai 0.27. No exploit; will drop when async-openai migrates (likely to `backon`)." },
+    { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained, transitive via backoff via async-openai. No exploit; drops with the backoff swap above." },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2: unmaintained, transitive via validator_derive 0.20; build-time only, zero runtime exposure." },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile: unmaintained, transitive via tonic via qdrant-client. Thin wrapper, no exploit; drop once qdrant-client switches to rustls-pki-types." },
+]
+
+# License policy.
+#
+# Allow-list rather than deny-list: any new dependency with a license not on
+# this list will fail CI and require an explicit decision. This is the point.
+[licenses]
+version = 2
+# Keep this tight: every entry must correspond to a license actually present
+# in the current dependency tree (cargo-deny emits "license-not-encountered"
+# warnings otherwise). New deps with new licenses will fail CI; add them here
+# explicitly with rationale.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CDLA-Permissive-2.0", # webpki-roots (Linux Foundation permissive data license)
+]
+confidence-threshold = 0.8
+exceptions = []
+
+# Multiple-version policy. Warn but do not fail; large transitive trees often
+# unavoidably end up with two versions of a small utility crate (`base64`,
+# `syn`, `windows-sys`...). CI surfaces them so we notice growth over time.
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+# Add explicit bans here as the architecture evolves. Examples we expect to
+# add after Phase B:
+#   { name = "axum", wrappers = ["api-gateway", "service-runtime"] }  # forbid axum in domain-core
+deny = []
+skip = []
+skip-tree = []
+
+# Source allow-list. Only crates.io and the workspace itself; no git, no
+# unspecified registry. New external sources require an explicit decision.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -3,6 +3,7 @@
 .PHONY: db-migration-new db-apply db-list db-push db-status
 .PHONY: install-frontend build-frontend install-backend build-backend test-backend lint-backend check-backend fmt-backend ci ci-full lint-frontend test-frontend verify-tracked
 .PHONY: verify-agent-toolchain agent-verify
+.PHONY: deny-backend machete-backend supply-chain-backend
 
 # Default target
 .DEFAULT_GOAL := help
@@ -72,9 +73,10 @@ build-frontend: ## Build frontend for production
 
 # Backend helpers (Rust)
 # Installs globally to ~/.cargo/bin (standard for Rust CLI tools). Ensure that directory is on PATH.
+# `cargo-deny` and `cargo-machete` are the tier-2 supply-chain gates wired into `make supply-chain-backend`.
 install-backend: ## Install backend development tools
 	@echo "${GREEN}Installing backend development tools...${NC}"
-	cd backend && cargo install cargo-watch cargo-audit
+	cd backend && cargo install --locked cargo-watch cargo-deny cargo-machete
 
 build-backend: ## Build backend in release mode
 	@echo "${GREEN}Building backend for production...${NC}"
@@ -95,6 +97,28 @@ check-backend: ## Check backend compiles
 fmt-backend: ## Format backend code
 	@echo "${GREEN}Formatting backend code...${NC}"
 	cd backend && cargo fmt
+
+# Tier-2 AI-guardrail supply-chain gates (see ARCHITECTURE_PLAN.md §14).
+# Each target soft-fails with a clear message if the tool is not installed so
+# `make agent-verify` still runs on minimal toolchains.
+deny-backend: ## Run cargo-deny (license, advisory, source, bans)
+	@echo "${GREEN}Running cargo deny check...${NC}"
+	@if command -v cargo-deny >/dev/null 2>&1; then \
+		cd backend && cargo deny check; \
+	else \
+		echo "${YELLOW}cargo-deny not installed; skipping. Install: cargo install --locked cargo-deny${NC}"; \
+	fi
+
+machete-backend: ## Run cargo-machete (unused dependency detection)
+	@echo "${GREEN}Running cargo machete...${NC}"
+	@if command -v cargo-machete >/dev/null 2>&1; then \
+		cd backend && cargo machete; \
+	else \
+		echo "${YELLOW}cargo-machete not installed; skipping. Install: cargo install --locked cargo-machete${NC}"; \
+	fi
+
+supply-chain-backend: deny-backend machete-backend ## Run all backend supply-chain checks
+	@echo "${GREEN}Backend supply-chain checks complete.${NC}"
 
 lint-frontend: ## Run frontend ESLint
 	@echo "${GREEN}Linting frontend...${NC}"
