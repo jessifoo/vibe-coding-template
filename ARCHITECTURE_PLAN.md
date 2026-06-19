@@ -383,7 +383,7 @@ This split is what lets every service stay ~300–800 LOC of *its own* concerns,
 | Provider enum `LlmProvider`, `LlmUsage` | `backend/src/models/llm.rs` | `contracts::v1::llm` |
 | Typed clients for each downstream service | new | `clients::{identity,llm,embedding,knowledge,documents}` |
 
-There is **one** of each. Every service imports them. No service is allowed to re-define them — enforced by `cargo deny` + workspace lints.
+There is **one** of each. Every service imports them. No service is allowed to re-define them — enforced by workspace lints + module visibility (`pub(crate)`) + CI checks on the dependency graph. `cargo deny` plays a complementary, narrower role: it polices dependency-graph policy (bans, license allow-list, security advisories, source allow-list) so the workspace does not silently grow a second copy of a shared crate or pick up an unvetted source.
 
 **What lives per-service (unique to that bounded context):**
 
@@ -483,7 +483,7 @@ Both paths funnel into the same `AuthenticatedUser` value. The choice is a `Iden
 
 ### 5.2 Internal (gateway ↔ downstream services)
 
-Once the gateway has resolved `AuthenticatedUser`, it issues a short-lived (60 s) HS256-signed JWS in a custom header (`X-Internal-Auth`). Downstream services use `internal-auth::Verifier` as an Axum extractor; it produces an `InternalPrincipal { user_id, roles, request_id }`. No bearer token ever crosses the internal boundary.
+Once the gateway has resolved `AuthenticatedUser`, it issues a short-lived (60 s) HS256-signed JWS and attaches it as `Authorization: Internal <token>` on the outbound request to a downstream service. Downstream services use `internal-auth::Verifier` as an Axum extractor; it consumes that header and produces an `InternalPrincipal { user_id, roles, request_id }`. The original Supabase bearer token (`Authorization: Bearer ...`) never crosses the internal boundary — the gateway is the only component that ever sees it.
 
 Why HMAC instead of mTLS for the template:
 
@@ -585,7 +585,7 @@ Three ship-as-template phases plus an optional fourth that you only reach for pe
   - Add `services/<ctx>-service/src/main.rs` (~15 lines: load context-specific config, call `service_runtime::run(<ctx>::build_router(...))`).
   - Implement `crates/clients/src/<ctx>.rs` — a typed HTTP client backed by the shared `reqwest::Client`.
   - Swap the in-process call site inside `app/`: replace `merge(<ctx>::build_router(...))` with a handler that delegates through `<Ctx>Client`. The application layer for that context now lives in the extracted service; the gateway only translates HTTP in / HTTP out.
-  - Turn on `internal-auth` between gateway and the extracted service (`X-Internal-Auth` header issued by gateway, verified by `internal-auth::Verifier` extractor in the service).
+  - Turn on `internal-auth` between gateway and the extracted service (`Authorization: Internal <token>` issued by gateway, verified by `internal-auth::Verifier` extractor in the service).
   - W3C `traceparent` propagation across the new boundary is already in place via `service-runtime` middleware + `clients/` — no additional code.
   - `docker-compose.yml` adds the new service alongside the gateway; production deploy adds one container.
 - **What you do not have to do:** rewrite anything in `domain/` or `application/`. The boundary you maintained inside the monolith *is* the seam.
