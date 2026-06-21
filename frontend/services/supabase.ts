@@ -1,19 +1,27 @@
-import {
-  createClient,
-  type AuthChangeEvent,
-  type Session,
-  type User,
+import { createBrowserClient } from '@supabase/ssr';
+import type {
+  AuthChangeEvent,
+  Session,
+  User,
 } from '@supabase/supabase-js';
 
-// Initialize the Supabase client
+// `@supabase/ssr`'s createBrowserClient handles cookie-based session storage
+// automatically and is the supported successor to the now-deprecated
+// `@supabase/auth-helpers-nextjs`. The browser auth API surface
+// (`supabase.auth.signInWith*`, `getSession`, `onAuthStateChange`, etc.) is
+// unchanged because @supabase/ssr re-exports the same SupabaseClient type
+// from @supabase/supabase-js.
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  // console.warn is whitelisted by ESLint config; surfaces a misconfiguration
+  // loudly at module load so local-dev / first-time-setup hits an actionable
+  // signal rather than an opaque auth failure later.
   console.warn('Missing Supabase environment variables. Authentication might not work correctly.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 
 // Authentication helpers
 export async function signInWithGoogle() {
