@@ -8,7 +8,7 @@
 use async_openai::{
     Client as OpenAIClient,
     config::OpenAIConfig,
-    types::{ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs},
+    types::chat::{ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs},
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -78,9 +78,12 @@ impl LlmService for OpenAiService {
             .build()
             .map_err(|e| AppError::BadRequest(format!("Failed to build message: {e}")))?;
 
+        // `max_completion_tokens` replaces OpenAI's deprecated `max_tokens` field
+        // (the SDK still accepts both, but the new name is the one that ships
+        // with the reasoning-token accounting in newer models).
         let request = CreateChatCompletionRequestArgs::default()
             .model(model)
-            .max_tokens(max_tokens)
+            .max_completion_tokens(max_tokens)
             .temperature(temperature)
             .messages(vec![message.into()])
             .build()

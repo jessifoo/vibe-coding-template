@@ -9,7 +9,7 @@ license = "MIT"
 [dependencies]
 # Web framework
 axum = { version = "0.8", features = ["macros"] }
-tower-http = { version = "0.6", features = ["cors", "trace", "request-id"] }
+tower-http = { version = "0.7", features = ["cors", "trace", "request-id"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full", "tracing"] }
@@ -22,7 +22,9 @@ serde_json = "1"
 dotenvy = "0.15"
 
 # HTTP client (Supabase, Anthropic — services without a Rust SDK)
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+# `rustls-tls` was renamed to `rustls` in reqwest 0.13; default-features still
+# disabled so we don't pull in `native-tls` / `openssl-sys` via `default-tls`.
+reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
 
 # Validation
 validator = { version = "0.20", features = ["derive"] }
@@ -43,8 +45,10 @@ urlencoding = "2.1"
 # Async traits (SOLID-style service abstractions behind trait objects)
 async-trait = "0.1"
 
-# LLM integrations (typed OpenAI SDK)
-async-openai = "0.27"
+# LLM integrations (typed OpenAI SDK). 0.41 split the SDK into per-endpoint
+# feature flags; we opt into `chat-completion` (the only async-openai endpoint
+# we use today — embeddings still go via raw reqwest).
+async-openai = { version = "0.41", default-features = false, features = ["rustls", "chat-completion"] }
 
 # Vector database
 qdrant-client = "1"

@@ -22,9 +22,7 @@ ignore = [
     # security exploit) on a deeply transitive crate with no first-party
     # fix available today. Each must include the upstream link, the path
     # it arrives via, and a rationale. Revisit on every `cargo update`.
-    { id = "RUSTSEC-2025-0012", reason = "backoff: unmaintained, transitive via async-openai 0.27. No exploit; will drop when async-openai migrates (likely to `backon`)." },
-    { id = "RUSTSEC-2024-0384", reason = "instant: unmaintained, transitive via backoff via async-openai. No exploit; drops with the backoff swap above." },
-    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2: unmaintained, transitive via validator_derive 0.20; build-time only, zero runtime exposure." },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2: unmaintained, transitive via validator_derive 0.20; build-time only, zero runtime exposure. Drops if/when we migrate to `garde`." },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile: unmaintained, transitive via tonic via qdrant-client. Thin wrapper, no exploit; drop once qdrant-client switches to rustls-pki-types." },
 ]
 
