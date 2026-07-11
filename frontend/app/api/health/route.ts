@@ -1,12 +1,6 @@
 import { NextResponse } from 'next/server';
 
-// Type declaration for process.env
-declare const process: {
-  env: {
-    NEXT_PUBLIC_API_URL?: string;
-    [key: string]: string | undefined;
-  };
-};
+// (@types/node provides `process` globally; no local declaration needed.)
 
 export async function GET() {
   try {
