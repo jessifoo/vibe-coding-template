@@ -72,29 +72,29 @@ Each row is a candidate for its own focused PR. Ordering is recommended; see "Su
 
 | # | Migration | Cost | Risk | Why it matters in <1yr |
 |---|---|---|---|---|
-| B1 | `@supabase/auth-helpers-nextjs` → `@supabase/ssr` | Small (15-line file: `frontend/app/auth/callback/route.ts`) | Low | Already deprecated by Supabase. Will rot. |
-| B2 | ESLint 8 → 9 + `@typescript-eslint` 6 → 8 + flat config | Medium (rewrite `.eslintrc.json` as `eslint.config.js`; ESLint 9 only accepts flat config) | Medium | ESLint 8 EOL Oct 2024. We are already 8 months past EOL; 6 high-severity `npm audit` findings in `@typescript-eslint` 6.x. |
+| ~~B1~~ | `@supabase/auth-helpers-nextjs` → `@supabase/ssr` | — | — | **Landed on `main`** (PR #39 merge). |
+| ~~B2~~ | ESLint 8 → 9 + `@typescript-eslint` 6 → 8 + flat config | — | — | **Landed on `main`** (PR #41 merge). |
 | B3 | Next 15 → 16 (paired with `eslint-config-next` 15 → 16) | Medium (Next 16 deprecated `next.config.js` defaults around caching/dynamic-IO; the codebase only uses defaults so should be light, but verify the OAuth callback route) | Medium | Next 15 hits EOL when 17 ships (~Oct 2026). Also fixes the postcss advisory transitively. |
 | B4 | React 18 → 19 (+ types) | Medium (no breaking change in our usage that I can see; verify `LoginForm`, `Dashboard`, `TextGenerator` and the new ref-as-prop) | Low–medium | RSC actions, `use()`, improved transitions are genuine wins for any Next 16 work. |
 | B5 | Zod 3 → 4 | Small–medium (renames at `frontend/lib/api-types.ts`; `.merge()` → `.extend()`, error format change) | Medium | Smaller bundle, better TS inference perf; Zod 3 will be supported but bug-fix-only. |
 | B6 | Tailwind 3 → 4 | Medium–large (CSS-first config: rewrite `tailwind.config.js` as inline `@theme` in `globals.css`; PostCSS plugin chain change) | Medium | Tailwind 4 is the active line; 3.x is in maintenance. Faster compiler is a real DX win on a template you fork a lot. |
-| B7 | TypeScript 5 → 6 | Small (most code is already strict) | Low–medium | TS 6 just shipped (~weeks old). Wait one minor for ecosystem catch-up — `@typescript-eslint` 8 needs to officially support it. Do this *after* B2. |
+| B7 | TypeScript 5 → 6 | Small (most code is already strict) | Low–medium | Wait one minor for ecosystem catch-up if needed; `@typescript-eslint` 8 is already on `main` via B2. |
 | B8 | `validator` → `garde` (Rust) | Medium (rewrite request struct annotations on `models/auth.rs`, `models/vectordb.rs`, `models/llm.rs`) | Low | Drops the `proc-macro-error2` advisory ignore. Pure win once you accept the API change. |
 | B9 | `qdrant-client` upstream fix to drop `rustls-pemfile` | Watch upstream | Low | Not actionable on our side until qdrant-client migrates to `rustls-pki-types`. The advisory ignore in `deny.toml` calls this out; the trigger to remove it is documented. |
 
 ### Suggested sequence (one PR each, in this order)
 
-1. **B1 — `@supabase/ssr` migration.** Smallest, biggest deprecation signal, no other deps depend on it.
-2. **B2 — ESLint 9 + ts-eslint 8 + flat config.** Closes 6 high-severity `npm audit` findings. Required for B3 (Next 16's `eslint-config-next` expects flat config).
-3. **B3 — Next 16 + eslint-config-next 16.** Closes the remaining postcss advisory. Pair with B4 since they share types.
+1. ~~**B1 — `@supabase/ssr` migration.**~~ **Done** (merged to `main`).
+2. ~~**B2 — ESLint 9 + ts-eslint 8 + flat config.**~~ **Done** (merged to `main`).
+3. **B3 — Next 16 + eslint-config-next 16.** Closes remaining postcss advisory. Pair with B4 since they share types.
 4. **B4 — React 19.** Pair with B3.
-5. **B7 — TypeScript 6.** Now ts-eslint 8 supports it.
+5. **B7 — TypeScript 6.** ts-eslint 8 already supports it.
 6. **B5 — Zod 4.** Touches contract types; do after the framework upgrades are stable so the diff is small.
 7. **B6 — Tailwind 4.** Touches styling but not logic; safe to do whenever.
 8. **B8 — `garde` Rust migration.** Independent of frontend.
 9. **B9 — qdrant-client / rustls-pemfile.** Watch upstream; no action today.
 
-Doing the first three back-to-back wipes every `npm audit` finding the current install has. The rest is shiny.
+B1+B2 landed; next three back-to-back (B3→B4→ remaining audit wipe) finish the high-severity frontend advisory story. The rest is shiny.
 
 ---
 
