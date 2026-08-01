@@ -106,7 +106,8 @@ Doing the first three back-to-back wipes every `npm audit` finding the current i
 | `urlencoding` 2.1 | small, stable, no churn expected | ✅ | n/a |
 | `async-trait` 0.1 | Rust-team maintained; will be deprecated once native `async fn` in traits covers our use case fully | ✅ | drop entirely once we move to native AFIT (Rust 1.75+ supports it; the limitation is dyn-trait object safety which 1.75 + RTN-syntax addresses) |
 | `tower` 0.5 | actively maintained, current major | ✅ | n/a |
-| `chrono`, `jsonwebtoken` | **removed** in this PR series (caught by `cargo machete` after the `clippy::disallowed_methods` work) | n/a | n/a |
+| `chrono` | **removed** — never imported; caught by `cargo machete` | n/a | n/a |
+| `jsonwebtoken` | **removed as unused dep** (option b). **Not abandoned as a capability:** local JWT verification (Option B / `SUPABASE_JWT_SECRET`) remains deferred — re-add when implementing `IDENTITY_VERIFY_MODE=local` | deferred | re-add `jsonwebtoken` (or equivalent) with Option B |
 | `cargo-deny`, `cargo-machete` | actively maintained Embark Studios tooling | ✅ | n/a |
 
 ---

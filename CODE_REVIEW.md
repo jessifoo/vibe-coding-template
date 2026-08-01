@@ -1,6 +1,8 @@
 # Code Review — Reporting to Uncle Bob
 
-> **Status update (later than the original audit):** the analysis below still stands and remains the evidence base. The *action* plan at the bottom of this document ("Optimization Plan") has been **superseded by [`ARCHITECTURE_PLAN.md`](./ARCHITECTURE_PLAN.md)**, which targets lead-developer-quality Clean Architecture expressed as microservices and **preserves every feature** (including the currently-unused Supabase database/storage code, which becomes the engine of a new `documents-service`). Read the analysis here for the *why*; read `ARCHITECTURE_PLAN.md` for the *what we are actually going to do*.
+> **Status update (later than the original audit):** the analysis below still stands and remains the evidence base. The *action* plan at the bottom of this document ("Optimization Plan") has been **superseded by [`ARCHITECTURE_PLAN.md`](./ARCHITECTURE_PLAN.md)**, which targets lead-developer-quality Clean Architecture and **preserves every feature** (including the currently-unused Supabase database/storage code, which becomes the engine of a new `documents` context). Read the analysis here for the *why*; read `ARCHITECTURE_PLAN.md` for the *what we are actually going to do*.
+>
+> **Anti-oversimplification (do not ignore):** Step 1 below originally said "delete the dead `services/supabase/*` layer." That framing is **wrong for this template** and **must not be executed**. Those services are unused *today*, not worthless — promote them into the `documents` context (Phase B). Also: dropping the unused `jsonwebtoken` crate (Step 2 option b) does **not** close the richer Option B path — local JWT verification via already-plumbed `SUPABASE_JWT_SECRET` remains a deferred enrichment (`ARCHITECTURE_PLAN.md` §5.1 / §12). Goal is CLEAN CODE and lead-developer quality, **not** shrinking LOC.
 
 
 > Audit of the **Full Stack Vibe Coding Template** (Next.js frontend + Rust Axum backend + Supabase + Qdrant), evaluated through the lens of *Clean Code*, *Clean Architecture*, and the **SOLID** principles.
@@ -294,33 +296,21 @@ If we ranked the findings by **impact / effort** Uncle-Bob-style:
 
 # Optimization Plan
 
+> **SUPERSEDED** by [`ARCHITECTURE_PLAN.md`](./ARCHITECTURE_PLAN.md). Kept below as historical evidence of the original audit recommendations. **Do not execute Step 1 as written** (delete framing). Prefer the Phase A→B promote-and-wire path.
+
 > Atomic, dependency-ordered. Each step touches **≤ 20 files**, preserves behavior unless explicitly noted, and ends with concrete success criteria a reviewer (or the next agent) can check off.
 
 ## Code Structure & Organization
 
-- [ ] **Step 1: Delete the dead `services/supabase/*` layer and consolidate Supabase types behind the gateway**
-  - **Task**: Remove `SupabaseAuthService`, `SupabaseDatabaseService`, `SupabaseStorageService`, and the duplicate `SupabaseUser` / `UserMetadata` / `extract_bearer_token`. Promote `infrastructure::supabase::models::SupabaseUserRecord` as the single Supabase wire model.
-  - **Files**:
-    - `backend/src/services/supabase/auth.rs`: **delete**.
-    - `backend/src/services/supabase/database.rs`: **delete** (or stage under a `wip/` branch if the team plans a future `DbGateway` port — but do not leave it on `main`).
-    - `backend/src/services/supabase/storage.rs`: **delete**.
-    - `backend/src/services/supabase/mod.rs`: **delete** (and drop `pub mod supabase;` from `services/mod.rs`).
-    - `backend/src/services/mod.rs`: remove `pub mod supabase;`.
-    - `backend/src/models/auth.rs`: remove `SupabaseUser` + `UserMetadata` + `impl From<SupabaseUser> for UserProfile`.
-    - `backend/src/models/mod.rs`: drop `SupabaseUser, UserMetadata` from the re-export list.
-    - `backend/src/http_auth.rs`: confirm it remains the sole bearer-parser; no change needed beyond removing the stale doc reference to `SupabaseAuthService::get_user`.
-  - **Step Dependencies**: None.
-  - **User Instructions**: Run `cargo check && cargo clippy --all-targets -- -D warnings && cargo test`. Expect a smaller binary and zero behavior change.
-  - **Success Criteria**: `rg SupabaseAuthService backend/` returns 0 hits. `cargo clippy` passes without dead-code warnings. Integration tests still green.
+- [ ] ~~**Step 1: Delete the dead `services/supabase/*` layer…**~~ **SUPERSEDED — DO NOT DELETE**
+  - **Corrected task** (see `ARCHITECTURE_PLAN.md` Phase B): **Promote** `SupabaseDatabaseService` / `SupabaseStorageService` into the `documents` context as `DocumentRepository` / `FileStore` adapters. Keep the capability; elevate the architecture. Duplicate wire models (`SupabaseUser` vs `SupabaseUserRecord`) and the duplicate bearer parser collapse as a *side effect* of giving everything a single home — not by deleting the feature surface first.
+  - **Forbidden**: deleting `backend/src/services/supabase/{database,storage,auth}.rs` solely to shrink LOC or silence "unused" warnings.
+  - **Success Criteria**: those services still exist until Phase B re-homes them; `rg SupabaseDatabaseService backend/` still finds the real CRUD implementation.
 
-- [ ] **Step 2: Drop the unused `jsonwebtoken` dependency** *(or wire it up for local JWT verification — pick one)*
-  - **Task**: Decide: either (a) implement local JWT verification using `SUPABASE_JWT_SECRET` to skip the per-request `GET /auth/v1/user` round-trip (lower latency, fewer external calls), or (b) remove the dependency entirely. Default to (b) until benchmark data justifies (a).
-  - **Files**:
-    - `backend/Cargo.toml`: drop `jsonwebtoken = "10"`.
-    - `backend/Cargo.lock`: regenerated.
-  - **Step Dependencies**: None.
-  - **User Instructions**: `cargo update -p jsonwebtoken --precise 0.0.0` is not needed; just `cargo build`.
-  - **Success Criteria**: `rg jsonwebtoken backend/` returns 0 hits in `src/`. Build is smaller.
+- [x] **Step 2: Drop the unused `jsonwebtoken` dependency** *(option b landed; option a still open)*
+  - **What landed**: unused `jsonwebtoken` crate removed from `Cargo.toml` (caught by `cargo machete`). Template default remains Option A — HTTP verify via `GET /auth/v1/user`.
+  - **Still deferred (do not treat as closed):** Option A→B enrichment — local JWT verification with already-plumbed `SUPABASE_JWT_SECRET` / `IdentityConfig::Mode` (`ARCHITECTURE_PLAN.md` §5.1, §12). Re-add `jsonwebtoken` (or equivalent) **when implementing Option B**, not as a dead dep.
+  - **Success Criteria (option b):** `rg jsonwebtoken backend/src/` returns 0. **Success Criteria (option a, future):** gateway can flip `IDENTITY_VERIFY_MODE=local` without a network hop per request.
 
 - [ ] **Step 3: Promote LLM/embedding service construction to `AppState` (share the `reqwest::Client`)**
   - **Task**: Today every request calls `LlmServiceFactory::get_service` / `EmbeddingServiceFactory::get_service`, which constructs a fresh `reqwest::Client`. Construct each provider once at boot, store as `Arc<dyn LlmService>` / `Arc<dyn EmbeddingService>` in `AppState`, and inject them into handlers.

@@ -4,7 +4,7 @@
 >
 > **Goal:** Lead-developer-quality Clean Architecture across the codebase. Every feature in the template stays; bounded contexts are made explicit; each context is deployed as its own service.
 >
-> **Non-goal:** Reducing the line count. Deletion happens only when it serves cleanliness (duplicate models, redundant parsers). Anything that represents real domain capability — including code that is currently unused — gets a proper home, not the trash can.
+> **Non-goal:** Reducing the line count / "simplifying" away feature complexity. Deletion happens only when it serves cleanliness (duplicate models, redundant parsers, never-imported deps). Anything that represents real domain capability — including code that is currently unused — gets a proper home, not the trash can. Dropping an unused crate does **not** close a richer deferred path (e.g. local JWT verification via `SUPABASE_JWT_SECRET`).
 
 ---
 
@@ -573,7 +573,7 @@ Three ship-as-template phases plus an optional fourth that you only reach for pe
 ### Phase C — Audit-cleanup polish *(small, safe, valuable)*
 
 - **Goal:** Land the remaining findings from `CODE_REVIEW.md` that aren't structural.
-- **Deliverable:** Frontend Docker-hostname fix (`route.ts`), migration off deprecated `@supabase/auth-helpers-nextjs` to `@supabase/ssr`, accessibility pass (`role="alert"`, contrast bumps), `error.tsx` + `not-found.tsx`, unified `MODEL_CATALOG`, copy-to-clipboard on LLM output, drop unused `jsonwebtoken` (or use it for local JWT verification — pick one).
+- **Deliverable:** Frontend Docker-hostname fix (`route.ts`), migration off deprecated `@supabase/auth-helpers-nextjs` to `@supabase/ssr`, accessibility pass (`role="alert"`, contrast bumps), `error.tsx` + `not-found.tsx`, unified `MODEL_CATALOG`, copy-to-clipboard on LLM output. **Local JWT verification (Option B)** remains available as a config-flag enrichment using already-plumbed `SUPABASE_JWT_SECRET` — the unused `jsonwebtoken` crate was dropped as option (b) only; re-add it when wiring Option B, do not treat removal as closing the richer path.
 - **Preserves:** All Phase B properties.
 - **Done when:** `npm run build` clean (no `ENOTFOUND` warnings), Lighthouse a11y ≥ 95 on `/dashboard`, no deprecated dependencies in `frontend/package.json`.
 
@@ -606,6 +606,7 @@ To keep the scope honest:
 - **No "distributed monolith."** Extracted contexts communicate **only** through their published clients; no context reads another's tables, ever.
 - **No gRPC in the template.** Considered and deferred. The `crates/clients/` abstraction is built so the swap stays local to that crate.
 - **No premature observability stack.** Tracing + JSON logs + `/healthz` + `/readyz` are in from Phase A. OTel exporters, Prometheus scraping, Grafana dashboards — wire them up *when you have something to monitor*, not before.
+- **No deleting unused-but-capable template code to shrink LOC.** "Unused today" ≠ "delete." Promote early services (`SupabaseDatabaseService`, `SupabaseStorageService`) into bounded contexts. Dropping a *dead dependency* (never imported) is fine; dropping a *feature surface* is not. Goal is CLEAN CODE, not simplification.
 
 ---
 
@@ -684,9 +685,10 @@ Every guardrail named in the plan, with current state and where it lives. ✅ = 
 | ✅ | `make agent-verify` aggregate | Makefile |
 | ✅ | **`.github/workflows/ci.yml`** runs `make agent-verify` on every PR + push to `main` | `.github/workflows/ci.yml` |
 | ✅ | `cargo deny check` with `deny.toml` covering license allow-list, advisory ignores (with rationale per ignore), source allow-list, wildcard bans | `backend/deny.toml`, `make deny-backend` |
-| ✅ | `cargo machete` for unused dependencies (already caught & removed `chrono` + `jsonwebtoken`) | `make machete-backend` |
-| ✅ | Dead `jsonwebtoken` dependency dropped (audit §2.1 finding) | `backend/Cargo.toml` |
-| ✅ | Dead `chrono` dependency dropped | `backend/Cargo.toml` |
+| ✅ | `cargo machete` for unused dependencies (caught & removed never-imported `chrono` + `jsonwebtoken`) | `make machete-backend` |
+| ✅ | Never-imported `jsonwebtoken` dep dropped (audit §2.1 option b). **Not closed:** Option B local JWT verify via `SUPABASE_JWT_SECRET` (§5.1 / §12) remains deferred enrichment — re-add the crate when implementing it | `backend/Cargo.toml` + `SupabaseConfig::jwt_secret` still plumbed |
+| ✅ | Never-imported `chrono` dependency dropped | `backend/Cargo.toml` |
+| 🆕 | Gateway `IDENTITY_VERIFY_MODE=local` (Option B): verify Supabase JWT locally with `SUPABASE_JWT_SECRET`; same `AuthenticatedUser` funnel as Option A | Phase C enrichment / identity context |
 | ✅ | Audit §2.4 fix: `serde_json::to_string(&doc_content).unwrap_or_default()` → propagates `AppError::Internal` (lossless) | `backend/src/services/vectordb/qdrant.rs` |
 | 🆕 | `cargo audit` standalone (currently covered by `cargo deny check advisories`; only add if we need finer-grained CI separation) | optional |
 | 🆕 | `cargo llvm-cov` with a coverage floor (start at 60%, ratchet up; fails CI if it drops) | CI |

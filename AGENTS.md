@@ -19,6 +19,8 @@ This is a modern full-stack application template with **Next.js frontend** and *
 ❌ Hardcode secrets or API keys
 ❌ Use magic numbers without constants
 ❌ Skip error handling "for now"
+❌ Delete unused-but-capable template services/ports "to clean up" — promote them into a bounded context instead (see ARCHITECTURE_PLAN.md)
+❌ Treat fewer lines / smaller surface as success when it removes feature complexity
 ```
 
 ### ALWAYS DO THESE (Required for Every Change)
@@ -32,6 +34,8 @@ This is a modern full-stack application template with **Next.js frontend** and *
 ✅ Validate all inputs at API boundaries
 ✅ Document public functions
 ✅ Follow existing patterns in the codebase
+✅ Preserve feature complexity; elevate Clean Architecture around it (goal is CLEAN CODE, not simplification)
+✅ Prefer promote-and-wire over delete-dead-code for template capabilities (e.g. Supabase database/storage → documents context)
 ```
 
 ---

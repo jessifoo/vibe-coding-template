@@ -17,6 +17,8 @@ These guidelines ensure AI assistants produce high-quality, maintainable code.
 - **NEVER** suppress linter warnings without documented justification
 - **NEVER** leave TODO comments without sufficient context and a tracking reference (issue/task ID)
 - **NEVER** commit commented-out code
+- **NEVER** delete unused-but-capable template services/ports "to clean up" — promote them into a bounded context instead (see `ARCHITECTURE_PLAN.md`)
+- **NEVER** treat fewer lines / smaller surface as success when it removes feature complexity — goal is CLEAN CODE, not simplification
 
 ### 2. Type Safety is Non-Negotiable
 - All function parameters must have explicit types

@@ -57,6 +57,7 @@ Confirm each item. Do not check a box you have not actually verified.
 - [ ] Auth enforced on every protected endpoint
 - [ ] No secrets in code or logs
 - [ ] Database migrations (if any) are reversible or document why not
+- [ ] Did **not** delete unused-but-capable template services/ports to shrink LOC (promote-and-wire instead; see `ARCHITECTURE_PLAN.md`)
 
 ## Manual testing
 
